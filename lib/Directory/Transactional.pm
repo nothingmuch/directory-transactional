@@ -579,7 +579,53 @@ journalling/recovery using C<flock> or L<File::NFSLock>
 This module provides lock based transactions over a set of files with full
 supported for nested transactions.
 
+=head1 THE RULES
+
+There are a few limitations to what this module can do.
+
+Following this guideline will prevent unpleasant encounters:
+
+=over 4
+
+=item Always use relative paths
+
+No attempt is made to sanify paths reaching outside of the root.
+
+All paths are assumed to be relative and within the root.
+
+=item No funny stuff
+
+Stick with plain files, with a link count of 1, or you will not get what you
+expect.
+
+For instance a rename will first copy the source file to the txn work dir, and
+then when comitting rename that file to the target dir and unlink the original.
+
+While seemingly more work, this is the only way to ensure that modifications to
+the file both before and after the rename are consistent.
+
+Modifications to directories are likewise not supported, but support may be
+added in the future.
+
+=item Always work in a transaction
+
+If you don't need transaction, use a global lock file and don't use this
+module.
+
+If you do, then make sure even your read access goes through this object with
+an active transaction, or you may risk reading uncomitted data, or conflicting
+with the transaction commit code.
+
+=item Use C<global_lock> or make sure you lock right
+
+If you stick to modifying the files through the API then you shouldn't have
+issues with locking, but try not to reuse paths and always reask for them to
+ensure that the right "real" path is returned even if the transaction stack has
+changed, or anything else.
+
 =head1 ACID GUARANTEES
+
+ACID stands for atomicity, consistency, isolation and durability.
 
 Transactions are atomic (using locks), consistent (a recovery mode is able to
 restore the state of the directory if a process crashed while comitting a
@@ -587,7 +633,9 @@ transaction), isolated (each transaction works in its own temporary directory,
 and durable (once C<txn_commit> returns a software crash will not call the
 transaction to rollback).
 
-=head1 TRANSACTIONAL SEMANTICS
+=head1 TRANSACTIONAL PROTOCOL
+
+This section describes the way the ACID guarantees are met:
 
 When the object is being constructed a nonblocking attempt to get an exclusive
 lock on the global shared lock file using L<File::NFSLock> or C<flock> is made.
@@ -623,6 +671,105 @@ directory acts like a journal entry. Recovery will rollback this transaction by
 restoring all the renamed backup files. Moving the backup directory into the
 work directory signifies that the transaction has comitted successfully, and
 recovery will clean these files up normally.
+
+=head1 ATTRIBUTES
+
+=over 4
+
+=item root
+
+This is the managed directory in which transactional semantics will be maintained.
+
+This can be either a string path or a L<Path::Class::Dir>.
+
+=item _work
+
+This attribute is named with a leading underscore to prevent thoughtless
+modification (if you have two workers accessing the same directory
+simultaneously but the work dir is different they will conflict and not even
+know it).
+
+The default work directory is placed under root, and is named C<.txn_work_dir>.
+
+The work dir's parent must be writable, because a lock file needs to be created
+next to it (the workdir name with C<.lock> appended).
+
+=item nfs
+
+If true (defaults to false), L<File::NFSLock> will be used for all locks
+instead of C<flock>.
+
+Note that on my machine the stress test reliably B<FAILS> with
+L<File::NFSLock>, due to a race condition (exclusive write lock granted to two
+writers simultaneously), even on a local filesystem. If you specify the C<nfs>
+flag make sure your C<link> system call is truly atomic.
+
+=item global_lock
+
+If true instead of using fine grained locking, a global write lock is obtained
+on the first call to C<txn_begin> and will be kept for as long as there is a
+running transaction.
+
+This is useful for avoiding deadlocks (there is no deadlock detection code in
+the fine grained locking).
+
+This flag is automatically set if C<nfs> is set.
+
+=item METHODS
+
+=head2 Transaction Management
+
+=over 4
+
+=item txn_do $code, %callbacks
+
+Executes C<$code> within a transaction in an C<eval> block.
+
+If any error is thrown the transaction will be rolled back. Otherwise the
+transaction is comitted.
+
+C<%callbacks> can contain entries for C<commit> and C<rollback>, which are
+called when the appropriate action is taken.
+
+=item txn_begin
+
+Begin a new transaction. Can be called even if there is already a running
+transaction (nested transactions are supported).
+
+=item txn_commit
+
+Commit the current transaction. If it is a nested transaction, it will commit
+to the parent transaction's work directory.
+
+=item txn_rollback
+
+Discard the current transaction, throwing away all changes since the last call
+to C<txn_begin>.
+
+=back
+
+=head2 Lock Management
+
+=over 4
+
+=item lock_path_read $path, $no_parent
+
+=item lock_path_write $path, $no_parent
+
+Lock the resource at C<$path> for writing or reading.
+
+By default the ancestors of C<$path> will be locked for reading to (from
+outermost to innermost).
+
+The only way to unlock a resource is by comitting the root transaction, or
+aborting the transaction in which the resource was locked.
+
+C<$path> does not have to be a real file in the C<root> directory, it is
+possible to use symbolic names in order to avoid deadlocks.
+
+Note that these methods are no-ops if C<global_lock> is set.
+
+=back
 
 =cut
 
