@@ -152,6 +152,9 @@ sub _build_shared_lock {
 sub BUILD {
 	my $self = shift;
 
+	croak "If 'nfs' is set then so must be 'global_lock'"
+		if $self->nfs and !$self->global_lock;
+
 	$self->_root($self->root->stringify) if blessed $self->root;
 
 	# obtains the shared lock, running recovery if needed
