@@ -65,6 +65,7 @@ sub _get_nfslock {
 		}) ) {
 		return $lock;
 	} elsif ( not($mode & LOCK_NB) ) {
+		no warnings 'once';
 		die $File::NFSLock::errstr;
 	}
 
