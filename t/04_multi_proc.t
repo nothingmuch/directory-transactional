@@ -27,7 +27,7 @@ use ok 'Directory::Transactional';
 	use Hook::LexWrap;
 
 	# inflate the exclusive lock time
-	wrap recover => pre => sub { select(undef,undef,undef,0.2) };
+	wrap recover => pre => sub { select(undef,undef,undef,0.05 * rand) };
 }
 
 foreach my $forks ( 0 .. FORKS ) {
@@ -67,7 +67,7 @@ foreach my $forks ( 0 .. FORKS ) {
 
 			srand($$); # otherwise rand returns the same in all children
 
-			select(undef,undef,undef,0.3 * rand);
+			select(undef,undef,undef,0.07 * rand);
 
 			{
 				alarm 5;
@@ -99,7 +99,7 @@ foreach my $forks ( 0 .. FORKS ) {
 
 					my $count = $s->exists($blort) ? $s->read($blort) : 0;
 
-					select(undef,undef,undef,0.05);
+					select(undef,undef,undef,0.01);
 
 					open my $fh, ">", $path;
 					$fh->print( $count + 1, "\n" );
