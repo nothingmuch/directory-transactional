@@ -150,7 +150,7 @@ sub recover {
 	# rollback partially comitted transactions
 	if ( -d $self->_backups ) {
 		foreach my $txn_backup ( $self->_backups->children ) {
-			$self->merge_overlay( $txn_backup => $self->root );
+			$self->merge_overlay( from => $txn_backup, to => $self->root );
 			$txn_backup->rmtree;
 		}
 	}
@@ -176,16 +176,18 @@ sub get_file_list {
 		},
 	);
 
-	return @files;
+	return \@files;
 }
 
 sub merge_overlay {
-	my ( $self, $from, $to, $backup ) = @_;
+	my ( $self, %args ) = @_;
 
-	my @files = $self->get_file_list($from);
+	my ( $from, $to, $backup, $files ) = @args{qw(from to backup files)};
+
+	$files ||= $self->get_file_list($from);
 
 	if ( $backup ) {
-		foreach my $file ( @files ) {
+		foreach my $file ( @$files ) {
 			my $src = $to->file($file);
 
 			next unless -e $src;
@@ -199,7 +201,7 @@ sub merge_overlay {
 		}
 	}
 
-	foreach my $file ( @files ) {
+	foreach my $file ( @$files ) {
 		my $src = $from->file($file);
 		my $targ = $to->file($file);
 
@@ -254,7 +256,7 @@ sub txn_commit {
 	if ( $txn->has_work ) {
 		if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
 			# commit the work, backing up in the backup dir
-			$self->merge_overlay( $txn->work, $self->root, $txn->backup );
+			$self->merge_overlay( from => $txn->work, to => $self->root, backup => $txn->backup );
 
 			# we're finished, remove backup dir denoting successful commit
 			rename $txn->backup, $txn->work . ".cleanup";
@@ -262,7 +264,7 @@ sub txn_commit {
 		} else {
 			# it's a nested transaction, which means we don't need to be
 			# careful about comitting to the parent, just merge it
-			$self->merge_overlay( $txn->work, $self->_txn->work );
+			$self->merge_overlay( from => $txn->work, to => $self->_txn->work );
 		}
 
 		# clean up work dir
