@@ -7,6 +7,9 @@ use Carp;
 use Path::Class;
 use Fcntl qw(LOCK_EX LOCK_SH LOCK_NB);
 
+use File::Basename qw(dirname basename);
+use File::Path qw(mkpath);
+
 use MooseX::Types::Path::Class qw(Dir File);
 
 use Directory::Transactional::TXN::Root;
@@ -20,11 +23,16 @@ has root => (
 	required => 1,
 );
 
-has work => (
+has [qw(work _backups _txns _locks)] => (
 	isa => Dir,
 	is  => "ro",
 	lazy_build => 1,
 );
+
+sub _build_work     { shift->root->subdir(".txn_work_dir") }
+sub _build__txns    { shift->work->subdir("txns") }
+sub _build__backups { shift->work->subdir("backups") }
+sub _build__locks   { shift->work->subdir("locks") }
 
 has nfs => (
 	isa => "Bool",
@@ -33,29 +41,68 @@ has nfs => (
 );
 
 sub _get_lock {
+	my ( $self, @args ) = @_;
+
+	return $self->nfs ? $self->_get_nfslock(@args) : $self->_get_flock(@args);
+}
+
+sub _get_nfslock {
 	my ( $self, $file, $mode ) = @_;
 
-	if ( $self->nfs ) {
-		require File::NFSLock;
-		if ( my $lock = File::NFSLock->new({
+	require File::NFSLock;
+	if ( my $lock = File::NFSLock->new({
 			file      => $file,
 			lock_type => $mode,
 		}) ) {
-			return $lock;
-		} elsif ( not($mode & LOCK_NB) ) {
-			die $File::NFSLock::errstr;
-		}
-	} else {
-		open my $fh, "+>", $file;
-
-		if ( flock($fh, $mode) ) {
-			return $fh;
-		} elsif ( not $!{EWOULDBLOCK} ) {
-			die $!;
-		}
+		return $lock;
+	} elsif ( not($mode & LOCK_NB) ) {
+		die $File::NFSLock::errstr;
 	}
 
 	return;
+}
+
+sub _get_flock {
+	my ( $self, $file, $mode ) = @_;
+
+	my $parent = dirname($file);
+	mkpath($parent) unless -d $parent;
+
+	open my $fh, "+>", $file;
+
+	if ( flock($fh, $mode) ) {
+		bless $fh, $mode & LOCK_EX ? "Directory::Transactional::Lock::Exclusive" : "Directory::Transactional::Lock::Shared";
+		return $fh;
+	} elsif ( not $!{EWOULDBLOCK} ) {
+		die $!;
+	}
+
+	return;
+}
+
+# support methods for fine grained locking
+{
+	package Directory::Transactional::Lock;
+
+	sub unlock { close $_[0] }
+
+	package Directory::Transactional::Lock::Exclusive;
+	use Fcntl qw(LOCK_SH);
+
+	our @ISA = qw(Directory::Transactional::Lock);
+
+	sub is_shared { 0 }
+	sub upgrade { }
+	sub downgrade { flock($_[0], LOCK_SH) or die $! }
+
+	package Directory::Transactional::Lock::Shared;
+	use Fcntl qw(LOCK_EX);
+
+	our @ISA = qw(Directory::Transactional::Lock);
+
+	sub is_shared { 1 }
+	sub upgrade { flock($_[0], LOCK_EX) or die $! }
+	sub downgrade { }
 }
 
 has _txn => (
@@ -63,24 +110,6 @@ has _txn => (
 	is  => "rw",
 	clearer => "_clear_txn",
 );
-
-sub _build_work { shift->root->subdir(".txn_work_dir") }
-
-has _txns => (
-	isa => Dir,
-	is  => "ro",
-	lazy_build => 1,
-);
-
-sub _build__txns { shift->work->subdir("txns") }
-
-has _backups => (
-	isa => Dir,
-	is  => "ro",
-	lazy_build => 1,
-);
-
-sub _build__backups { shift->work->subdir("backups") }
 
 has _shared_lock_file => (
 	isa => "Str",
@@ -135,6 +164,7 @@ sub DEMOLISH {
 	# condition in their directory creation code
 	if ( my $ex_lock = $self->_get_lock( $self->_shared_lock_file, LOCK_EX|LOCK_NB ) ) {
 		# we don't really care if there's an error
+		$self->_locks->rmtree({});
 		rmdir $self->_txns;
 		rmdir $self->_backups;
 		unlink $self->work->file("txn_lock");
@@ -166,13 +196,13 @@ sub get_file_list {
 	my ( $self, $from ) = @_;
 
 	my @files;
-	
+
 	dir($from)->recurse(
 		callback => sub {
 			my $file = shift;
 
 			my $rel = $file->relative($from);
-			push @files, $rel;
+			push @files, $rel->stringify;
 		},
 	);
 
@@ -182,12 +212,14 @@ sub get_file_list {
 sub merge_overlay {
 	my ( $self, %args ) = @_;
 
-	my ( $from, $to, $backup, $files ) = @args{qw(from to backup files)};
+	my ( $from, $to, $backup, $changes ) = @args{qw(from to backup changes)};
 
-	$files ||= $self->get_file_list($from);
+	$changes ||= $self->get_file_list($from);
 
 	if ( $backup ) {
-		foreach my $file ( @$files ) {
+		foreach my $change ( @$changes ) {
+			my $file = ref $change ? $$change : $change;
+
 			my $src = $to->file($file);
 
 			next unless -e $src;
@@ -201,14 +233,18 @@ sub merge_overlay {
 		}
 	}
 
-	foreach my $file ( @$files ) {
-		my $src = $from->file($file);
-		my $targ = $to->file($file);
+	foreach my $change ( @$changes ) {
+		if ( ref $change ) {
+			unlink $$change or die $!;
+		} else {
+			my $src = $from->file($change);
+			my $targ = $to->file($change);
 
-		my $p = $targ->parent;
-		$p->mkpath unless -d $p;
+			my $p = $targ->parent;
+			$p->mkpath unless -d $p;
 
-		rename $src => $targ;
+			rename $src => $targ;
+		}
 	}
 }
 
@@ -225,7 +261,7 @@ sub txn_begin {
 	} else {
 		$txn = Directory::Transactional::TXN::Root->new(
 			manager     => $self,
-			global_lock => $self->_get_lock( $self->work->file("txn_lock")->stringify, LOCK_EX ),
+			( $self->nfs ? ( global_lock => $self->_get_lock( $self->work->file("txn_lock")->stringify, LOCK_EX ) ) : () ),
 		);
 	}
 
@@ -256,21 +292,22 @@ sub txn_commit {
 	if ( $txn->has_work ) {
 		if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
 			# commit the work, backing up in the backup dir
-			$self->merge_overlay( from => $txn->work, to => $self->root, backup => $txn->backup );
+			$self->merge_overlay( from => $txn->work, to => $self->root, backup => $txn->backup, changes => $txn->changes );
 
 			# we're finished, remove backup dir denoting successful commit
 			rename $txn->backup, $txn->work . ".cleanup";
-			$txn->clear_backup;
 		} else {
 			# it's a nested transaction, which means we don't need to be
-			# careful about comitting to the parent, just merge it
-			$self->merge_overlay( from => $txn->work, to => $self->_txn->work );
+			# careful about comitting to the parent, just share all the locks,
+			# and merge it
+			$txn->propagate_locks;
+
+			$self->merge_overlay( from => $txn->work, to => $self->_txn->work, changes => $txn->changes );
 		}
 
 		# clean up work dir
 		$txn->work->rmtree;
 		dir($txn->work . ".cleanup")->rmtree;
-		$txn->clear_work;
 	}
 
 	return;
@@ -279,13 +316,77 @@ sub txn_commit {
 sub txn_rollback {
 	my $self = shift;
 
-	$self->_pop_txn;
+	my $txn = $self->_pop_txn;
+
+	# any inherited locks that have been upgraded in this txn need to be
+	# downgraded back to shared locks
+	foreach my $lock ( @{ $txn->downgrade } ) {
+		$lock->downgrade;
+	}
+
+	if ( $txn->has_work ) {
+		$txn->work->rmtree;
+	}
 
 	return;
 }
 
+sub lock_path_read {
+	my ( $self, $path ) = @_;
+
+	return if $self->nfs;
+
+	# FIXME read lock parents
+
+	my $txn = $self->_txn;
+
+	# any type of lock in this or any parent transaction is going to be good enough
+	unless ( $txn->find_lock($path) ) {
+		$txn->set_lock( $path, $self->_get_flock( $self->_locks->file($path) . ".lock", LOCK_SH) );
+	}
+}
+
+sub lock_path_write {
+	my ( $self, $path ) = @_;
+
+	return if $self->nfs;
+
+	# FIXME read lock parents
+
+	my $txn = $self->_txn;
+
+	if ( my $lock = $txn->get_lock($path) ) {
+		# simplest scenario, we already have a lock in this transaction
+		$lock->upgrade; # upgrade it if necessary
+
+	} elsif ( my $inherited_lock = $txn->find_lock($path) ) {
+		# a parent transaction has a lock
+		if ( $inherited_lock->is_shared ) {
+			# upgrade it, and mark for downgrade on rollback
+			$inherited_lock->upgrade;
+			push @{ $txn->downgrade }, $inherited_lock;
+		}
+		$txn->set_lock( $path, $inherited_lock );
+	} else {
+		# otherwise create a new lock
+		$txn->set_lock( $path, $self->_get_flock( $self->_locks->file($path) . ".lock", LOCK_EX) );
+	}
+}
+
+sub remove_file {
+	my ( $self, $path ) = @_;
+
+	$self->lock_path_write($path);
+
+	$self->_txn->_changes->{$path} = bless \$path, "Directory::Transactional::Delete";
+}
+
 sub work_path {
 	my ( $self, $path ) = @_;
+
+	$self->lock_path_write($path);
+
+	$self->_txn->_changes->{$path} = $path;
 	$self->_txn->work->file($path);
 }
 

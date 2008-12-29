@@ -44,11 +44,39 @@ sub _build_backup {
 	return $dir;
 }
 
-has _files => (
+has [qw(_changes _locks)] => (
 	isa => "HashRef",
 	is  => "ro",
 	default => sub { {} },
 );
+
+has [qw(downgrade)] => (
+	isa => "ArrayRef",
+	is  => "ro",
+	default => sub { [] },
+);
+
+sub propagate_locks {
+	my $self = shift;
+
+	my $l = $self->_locks;
+	@{ $self->parent->_locks }{ keys %$l } = values %$l;
+}
+
+sub set_lock {
+	my ( $self, $path, $lock ) = @_;
+	$self->_locks->{$path} = $lock;
+}
+
+sub get_lock {
+	my ( $self, $path ) = @_;
+	$self->_locks->{$path};
+}
+
+sub changes {
+	my $self = shift;
+	return [ values %{ $self->_changes } ];
+}
 
 sub DEMOLISH {
 	my $self = shift;

@@ -7,10 +7,16 @@ use namespace::clean -except => 'meta';
 
 extends qw(Directory::Transactional::TXN);
 
+# optional lock attr, used in NFS mode when no fine grained locking is
+# available
 has global_lock => (
 	is  => "ro",
-	required => 1,
 );
+
+sub find_lock {
+	my ( $self, $path ) = @_;
+	$self->get_lock($path);
+}
 
 __PACKAGE__->meta->make_immutable;
 
