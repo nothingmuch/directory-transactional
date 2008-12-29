@@ -111,18 +111,3 @@ __PACKAGE__
 
 __END__
 
-=pod
-
-=head1 NAME
-
-Directory::Transactional::TXN - ACID transactions on a set of files with recovery
-
-=head1 SYNOPSIS
-
-	use Directory::Transactional::TXN;
-
-=head1 DESCRIPTION
-
-=cut
-
-

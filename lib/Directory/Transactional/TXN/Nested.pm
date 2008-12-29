@@ -43,18 +43,3 @@ __PACKAGE__
 
 __END__
 
-=pod
-
-=head1 NAME
-
-Directory::Transactional::TXN::Nested - 
-
-=head1 SYNOPSIS
-
-	use Directory::Transactional::TXN::Nested;
-
-=head1 DESCRIPTION
-
-=cut
-
-
