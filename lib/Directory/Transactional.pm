@@ -50,7 +50,7 @@ sub _get_lock {
 
 		if ( flock($fh, $mode) ) {
 			return $fh;
-		} elsif ( not($mode & LOCK_NB) ) {
+		} elsif ( not $!{EWOULDBLOCK} ) {
 			die $!;
 		}
 	}
