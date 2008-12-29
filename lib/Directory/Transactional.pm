@@ -1,4 +1,5 @@
 #!/usr/bin/perl
+# ABSTRACT: ACID transactions on a directory tree
 
 package Directory::Transactional;
 use Squirrel;
