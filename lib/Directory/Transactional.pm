@@ -40,6 +40,13 @@ has nfs => (
 	default => 0,
 );
 
+has global_lock => (
+	isa => "Bool",
+	is  => "ro",
+	lazy => 1,
+	default => sub { shift->nfs },
+);
+
 sub _get_lock {
 	my ( $self, @args ) = @_;
 
@@ -112,12 +119,13 @@ has _txn => (
 	clearer => "_clear_txn",
 );
 
-has _shared_lock_file => (
+has [qw(_txn_lock_file _shared_lock_file)] => (
 	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
 );
 
+sub _build__txn_lock_file { File::Spec->catfile(shift->_work, "txn_lock") }
 sub _build__shared_lock_file { shift->_work . ".lock" }
 
 has shared_lock => (
@@ -170,7 +178,7 @@ sub DEMOLISH {
 		remove_tree($self->_locks);
 		rmdir $self->_txns;
 		rmdir $self->_backups;
-		unlink File::Spec->catfile($self->_work, "txn_lock");
+		unlink $self->_txn_lock_file;
 		rmdir $self->_work;
 
 		unlink $self->_shared_lock_file;
@@ -264,8 +272,8 @@ sub txn_begin {
 		);
 	} else {
 		$txn = Directory::Transactional::TXN::Root->new(
-			manager     => $self,
-			( $self->nfs ? ( global_lock => $self->_get_lock( File::Spec->catfile($self->_work, "txn_lock"), LOCK_EX ) ) : () ),
+			manager => $self,
+			( $self->global_lock ? ( global_lock => $self->_get_lock( $self->_txn_lock_file, LOCK_EX ) ) : () ),
 		);
 	}
 
@@ -338,7 +346,7 @@ sub txn_rollback {
 sub lock_path_read {
 	my ( $self, $path ) = @_;
 
-	return if $self->nfs;
+	return if $self->global_lock;
 
 	my @dirs = File::Spec->splitdir($path);
 	pop @dirs;
@@ -364,7 +372,7 @@ sub lock_path_read {
 sub lock_path_write {
 	my ( $self, $path, $skip_parent ) = @_;
 
-	return if $self->nfs;
+	return if $self->global_lock;
 
 	unless ( $skip_parent ) {
 		my ( undef, $dir ) = File::Spec->splitpath($path);
