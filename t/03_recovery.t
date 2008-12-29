@@ -36,24 +36,28 @@ use ok 'Directory::Transactional';
 	}
 
 	ok( not(-d $base->subdir("work")), "workdir removed" );
+
+	local $SIG{__WARN__} = sub { }; # make Directory::Scratch shut up
+	undef $s;
+	undef $s;
 }
 
 {
 	my $s = scratch();
 
 	$s->create_tree({
-			# inconsistent state:
-			'root/foo.txt'        => "les foo",
-			'root/bar.txt'        => "the bar",
-			'root/blah/gorch.txt' => "los gorch",
+		# inconsistent state:
+		'root/foo.txt'        => "les foo",
+		'root/bar.txt'        => "the bar",
+		'root/blah/gorch.txt' => "los gorch",
 
-			# some backups
-			'work/backups/123/foo.txt'        => "the foo",
-			'work/backups/abc/blah/gorch.txt' => "the gorch",
+		# some backups
+		'work/backups/123/foo.txt'        => "the foo",
+		'work/backups/abc/blah/gorch.txt' => "the gorch",
 
-			# already comitted
-			'work/txns/5421/bar.txt' => "old",
-		});
+		# already comitted
+		'work/txns/5421/bar.txt' => "old",
+	});
 
 	my $base = $s->base;
 
@@ -75,4 +79,8 @@ use ok 'Directory::Transactional';
 	}
 
 	ok( not(-d $base->subdir("work")), "workdir removed" );
+
+	local $SIG{__WARN__} = sub { }; # make Directory::Scratch shut up
+	undef $s;
+	undef $s;
 }

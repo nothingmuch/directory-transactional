@@ -35,20 +35,20 @@ foreach my $forks ( 0 .. FORKS ) {
 		my $s = scratch();
 
 		$s->create_tree({
-				# inconsistent state:
-				'foo.txt'   => "les foo",
-				'bar.txt'   => "the bar",
-				'baz.txt'   => "the baz",
-				'gorch.txt' => "los gorch",
-				'bloo/blah/counter.txt' => "7",
+			# inconsistent state:
+			'foo.txt'   => "les foo",
+			'bar.txt'   => "the bar",
+			'baz.txt'   => "the baz",
+			'gorch.txt' => "los gorch",
+			'bloo/blah/counter.txt' => "7",
 
-				# some backups
-				'work/backups/123/foo.txt'   => "the foo",
-				'work/backups/abc/gorch.txt' => "the gorch",
+			# some backups
+			'work/backups/123/foo.txt'   => "the foo",
+			'work/backups/abc/gorch.txt' => "the gorch",
 
-				# already comitted
-				'work/txns/5421/bar.txt' => "old",
-			});
+			# already comitted
+			'work/txns/5421/bar.txt' => "old",
+		});
 
 		my $base = $s->base;
 
@@ -138,5 +138,8 @@ foreach my $forks ( 0 .. FORKS ) {
 			ok( !$s->exists('work/backups/abc/gorch.txt'), "gorch.txt backup file removed" );
 			ok( !$s->exists('work/txns/5421/bar.txt'), "bar.txt tempfile removed" );
 		}
+
+		local $SIG{__WARN__} = sub { }; # make Directory::Scratch shut up
+		undef $s;
 	}
 }
