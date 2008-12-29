@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 package Directory::Transactional;
-use Moose;
+use Squirrel;
 
 use Carp;
 use Fcntl qw(LOCK_EX LOCK_SH LOCK_NB);
@@ -17,19 +17,18 @@ use Directory::Transactional::TXN::Nested;
 use namespace::clean -except => 'meta';
 
 has root => (
-	isa => "Str|Path::Class::Dir",
 	is  => "ro",
-	writer => "_root",
 	required => 1,
 );
 
-has [qw(_work _backups _txns _locks)] => (
+has [qw(_root _work _backups _txns _locks)] => (
 	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
 );
 
-sub _build__work    { File::Spec->catdir(shift->root, ".txn_work_dir") } # top level for all temp files
+sub _build__root    { my $self = shift; blessed($self->root) ? $self->root->stringify : $self->root }
+sub _build__work    { File::Spec->catdir(shift->_root, ".txn_work_dir") } # top level for all temp files
 sub _build__txns    { File::Spec->catdir(shift->_work, "txns") } # one subdir per transaction, used for temporary files when transactions are active
 sub _build__backups { File::Spec->catdir(shift->_work, "backups") } # one subdir per transaction, used during commit to root
 sub _build__locks   { File::Spec->catdir(shift->_work, "locks") } # shared between all workers, directory for lockfiles
@@ -165,9 +164,6 @@ sub BUILD {
 	croak "If 'nfs' is set then so must be 'global_lock'"
 		if $self->nfs and !$self->global_lock;
 
-	# in case we got a Path::Class::Dir object
-	$self->_root($self->root->stringify) if blessed $self->root;
-
 	# obtains the shared lock, running recovery if needed
 	$self->shared_lock;
 
@@ -215,7 +211,7 @@ sub recover {
 			my $files = $self->get_file_list($txn_backup);
 
 			# move all the backups back into the root directory
-			$self->merge_overlay( from => $txn_backup, to => $self->root, changes => $files );
+			$self->merge_overlay( from => $txn_backup, to => $self->_root, changes => $files );
 
 			remove_tree($txn_backup);
 		}
@@ -333,7 +329,7 @@ sub txn_commit {
 	if ( @$changes ) {
 		if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
 			# commit the work, backing up in the backup dir
-			$self->merge_overlay( from => $txn->work, to => $self->root, backup => $txn->backup, changes => $changes );
+			$self->merge_overlay( from => $txn->work, to => $self->_root, backup => $txn->backup, changes => $changes );
 
 			# we're finished, remove backup dir denoting successful commit
 			rename $txn->backup, $txn->work . ".cleanup" or die $!;

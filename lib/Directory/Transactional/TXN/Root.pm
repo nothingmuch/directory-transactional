@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 package Directory::Transactional::TXN::Root;
-use Moose;
+use Squirrel;
 
 use File::Spec;
 use File::Path qw(make_path remove_tree);
