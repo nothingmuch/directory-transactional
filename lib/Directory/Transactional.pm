@@ -141,7 +141,7 @@ has [qw(_txn_lock_file _shared_lock_file)] => (
 sub _build__txn_lock_file { File::Spec->catfile(shift->_work, "txn_lock") }
 sub _build__shared_lock_file { shift->_work . ".lock" }
 
-has shared_lock => (
+has _shared_lock => (
 	is  => "ro",
 	lazy_build => 1,
 );
@@ -149,7 +149,7 @@ has shared_lock => (
 # the shared lock is always taken at startup
 # a nonblocking attempt to lock it exclusively is made first, and if granted we
 # have exclusive access to the work directory so recovery is run if necessary
-sub _build_shared_lock {
+sub _build__shared_lock {
 	my $self = shift;
 
 	my $file = $self->_shared_lock_file;
@@ -170,7 +170,7 @@ sub BUILD {
 		if $self->nfs and !$self->global_lock;
 
 	# obtains the shared lock, running recovery if needed
-	$self->shared_lock;
+	$self->_shared_lock;
 
 	make_path($self->_work);
 }
@@ -184,7 +184,7 @@ sub DEMOLISH {
 	}
 
 	# lose the shared lock
-	$self->clear_shared_lock;
+	$self->_clear_shared_lock;
 
 	# cleanup workdirs
 	# only remove if no other workers are active, so that there is no race
