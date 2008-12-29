@@ -4,13 +4,12 @@ package Directory::Transactional;
 use Moose;
 
 use Carp;
-use Path::Class;
 use Fcntl qw(LOCK_EX LOCK_SH LOCK_NB);
 
-use File::Basename qw(dirname basename);
-use File::Path qw(mkpath);
-
-use MooseX::Types::Path::Class qw(Dir File);
+use File::Spec;
+use File::Find qw(find);
+use File::Path qw(make_path remove_tree);
+use IO::Dir;
 
 use Directory::Transactional::TXN::Root;
 use Directory::Transactional::TXN::Nested;
@@ -18,21 +17,22 @@ use Directory::Transactional::TXN::Nested;
 use namespace::clean -except => 'meta';
 
 has root => (
-	isa => Dir,
+	isa => "Str|Path::Class::Dir",
 	is  => "ro",
+	writer => "_root",
 	required => 1,
 );
 
-has [qw(work _backups _txns _locks)] => (
-	isa => Dir,
+has [qw(_work _backups _txns _locks)] => (
+	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
 );
 
-sub _build_work     { shift->root->subdir(".txn_work_dir") }
-sub _build__txns    { shift->work->subdir("txns") }
-sub _build__backups { shift->work->subdir("backups") }
-sub _build__locks   { shift->work->subdir("locks") }
+sub _build__work    { File::Spec->catdir(shift->root, ".txn_work_dir") }
+sub _build__txns    { File::Spec->catdir(shift->_work, "txns") }
+sub _build__backups { File::Spec->catdir(shift->_work, "backups") }
+sub _build__locks   { File::Spec->catdir(shift->_work, "locks") }
 
 has nfs => (
 	isa => "Bool",
@@ -65,8 +65,9 @@ sub _get_nfslock {
 sub _get_flock {
 	my ( $self, $file, $mode ) = @_;
 
-	my $parent = dirname($file);
-	mkpath($parent) unless -d $parent;
+	my ( $vol, $dir ) = File::Spec->splitpath($file);
+	my $parent = File::Spec->catpath($vol, $dir);
+	make_path($parent) unless -d $parent;
 
 	open my $fh, "+>", $file;
 
@@ -117,7 +118,7 @@ has _shared_lock_file => (
 	lazy_build => 1,
 );
 
-sub _build__shared_lock_file { shift->work . ".lock" }
+sub _build__shared_lock_file { shift->_work . ".lock" }
 
 has shared_lock => (
 	is  => "ro",
@@ -143,10 +144,12 @@ sub _build_shared_lock {
 sub BUILD {
 	my $self = shift;
 
+	$self->_root($self->root->stringify) if blessed $self->root;
+
 	# obtains the shared lock, running recovery if needed
 	$self->shared_lock;
 
-	$self->work->mkpath;
+	make_path($self->_work);
 }
 
 sub DEMOLISH {
@@ -164,11 +167,11 @@ sub DEMOLISH {
 	# condition in their directory creation code
 	if ( my $ex_lock = $self->_get_lock( $self->_shared_lock_file, LOCK_EX|LOCK_NB ) ) {
 		# we don't really care if there's an error
-		$self->_locks->rmtree({});
+		remove_tree($self->_locks);
 		rmdir $self->_txns;
 		rmdir $self->_backups;
-		unlink $self->work->file("txn_lock");
-		rmdir $self->work;
+		unlink File::Spec->catfile($self->_work, "txn_lock");
+		rmdir $self->_work;
 
 		unlink $self->_shared_lock_file;
 	}
@@ -178,17 +181,19 @@ sub recover {
 	my $self = shift;
 
 	# rollback partially comitted transactions
-	if ( -d $self->_backups ) {
-		foreach my $txn_backup ( $self->_backups->children ) {
+	if ( -d ( my $b = $self->_backups ) ) {
+		foreach my $name ( IO::Dir->new($b)->read ) {
+			next if $name eq '.' || $name eq '..';
+			my $txn_backup = File::Spec->catdir($b, $name);
 			$self->merge_overlay( from => $txn_backup, to => $self->root );
-			$txn_backup->rmtree;
+			remove_tree($txn_backup);
 		}
 	}
 
 	# delete all temp files (fully comitted but not cleaned up transactions,
 	# and uncomitted transactions)
 	if ( -d $self->_txns ) {
-		$self->_txns->rmtree({ keep_root => 1 });
+		remove_tree( $self->_txns, { keep_root => 1 } );
 	}
 }
 
@@ -197,14 +202,7 @@ sub get_file_list {
 
 	my @files;
 
-	dir($from)->recurse(
-		callback => sub {
-			my $file = shift;
-
-			my $rel = $file->relative($from);
-			push @files, $rel->stringify;
-		},
-	);
+	find( { no_chdir => 1, wanted   => sub { push @files, File::Spec->abs2rel($_, $from) if -f $_ } }, $from );
 
 	return \@files;
 }
@@ -214,22 +212,26 @@ sub merge_overlay {
 
 	my ( $from, $to, $backup, $changes ) = @args{qw(from to backup changes)};
 
+	ref and $_ = $_->stringify for $from, $to, $backup;
+
 	$changes ||= $self->get_file_list($from);
 
 	if ( $backup ) {
 		foreach my $change ( @$changes ) {
 			my $file = ref $change ? $$change : $change;
 
-			my $src = $to->file($file);
+			my $src = File::Spec->catfile($to, $file);
 
 			next unless -e $src;
 
-			my $targ = $backup->file($file);
+			my $targ = File::Spec->catfile($backup, $file);
 
-			my $p = $targ->parent;
-			$p->mkpath unless -d $p;
+			my ( undef, $dir ) = File::Spec->splitpath($targ);
+			if ( $dir ) {
+				make_path($dir) unless -d $dir;
+			}
 
-			rename $src, $targ;
+			rename $src, $targ or die $!;
 		}
 	}
 
@@ -237,13 +239,15 @@ sub merge_overlay {
 		if ( ref $change ) {
 			unlink $$change or die $!;
 		} else {
-			my $src = $from->file($change);
-			my $targ = $to->file($change);
+			my $src = File::Spec->catfile($from,$change);
+			my $targ = File::Spec->catfile($to,$change);
 
-			my $p = $targ->parent;
-			$p->mkpath unless -d $p;
+			my ( undef, $dir ) = File::Spec->splitpath($targ);
+			if ( $dir ) {
+				make_path($dir) unless -d $dir;
+			}
 
-			rename $src => $targ;
+			rename $src => $targ or die $!;
 		}
 	}
 }
@@ -261,7 +265,7 @@ sub txn_begin {
 	} else {
 		$txn = Directory::Transactional::TXN::Root->new(
 			manager     => $self,
-			( $self->nfs ? ( global_lock => $self->_get_lock( $self->work->file("txn_lock")->stringify, LOCK_EX ) ) : () ),
+			( $self->nfs ? ( global_lock => $self->_get_lock( File::Spec->catfile($self->_work, "txn_lock"), LOCK_EX ) ) : () ),
 		);
 	}
 
@@ -295,19 +299,19 @@ sub txn_commit {
 			$self->merge_overlay( from => $txn->work, to => $self->root, backup => $txn->backup, changes => $txn->changes );
 
 			# we're finished, remove backup dir denoting successful commit
-			rename $txn->backup, $txn->work . ".cleanup";
+			rename $txn->backup, $txn->work . ".cleanup" or die $!;
 		} else {
 			# it's a nested transaction, which means we don't need to be
 			# careful about comitting to the parent, just share all the locks,
 			# and merge it
 			$txn->propagate_locks;
 
-			$self->merge_overlay( from => $txn->work, to => $self->_txn->work, changes => $txn->changes );
+			$self->merge_overlay( from => $txn->work, to => $txn->parent->work, changes => $txn->changes );
 		}
 
 		# clean up work dir
-		$txn->work->rmtree;
-		dir($txn->work . ".cleanup")->rmtree;
+		remove_tree( $txn->work );
+		remove_tree( $txn->work . ".cleanup" );
 	}
 
 	return;
@@ -325,7 +329,7 @@ sub txn_rollback {
 	}
 
 	if ( $txn->has_work ) {
-		$txn->work->rmtree;
+		remove_tree( $txn->work );
 	}
 
 	return;
@@ -336,25 +340,35 @@ sub lock_path_read {
 
 	return if $self->nfs;
 
-	if ( (my $dir = dirname($path)) ne '.' ) {
-		$self->lock_path_read($dir);
+	my @dirs = File::Spec->splitdir($path);
+	pop @dirs;
+
+	my @paths;
+
+	if ( @dirs ) {
+		for ( my $next = shift @dirs; @dirs; $next = File::Spec->catdir($next, shift @dirs) ) {
+			push @paths, $next;
+		}
 	}
 
 	my $txn = $self->_txn;
 
-	# any type of lock in this or any parent transaction is going to be good enough
-	unless ( $txn->find_lock($path) ) {
-		$txn->set_lock( $path, $self->_get_flock( $self->_locks->file($path) . ".lock", LOCK_SH) );
+	foreach my $path ( @paths, $path ) {
+		# any type of lock in this or any parent transaction is going to be good enough
+		unless ( $txn->find_lock($path) ) {
+			$txn->set_lock( $path, $self->_get_flock( File::Spec->catfile( $self->_locks, $path . ".lock" ), LOCK_SH) );
+		}
 	}
 }
 
 sub lock_path_write {
-	my ( $self, $path ) = @_;
+	my ( $self, $path, $skip_parent ) = @_;
 
 	return if $self->nfs;
 
-	if ( (my $dir = dirname($path)) ne '.' ) {
-		$self->lock_path_read($dir);
+	unless ( $skip_parent ) {
+		my ( undef, $dir ) = File::Spec->splitpath($path);
+		$self->lock_path_read($dir) if $dir;
 	}
 
 	my $txn = $self->_txn;
@@ -373,15 +387,18 @@ sub lock_path_write {
 		$txn->set_lock( $path, $inherited_lock );
 	} else {
 		# otherwise create a new lock
-		$txn->set_lock( $path, $self->_get_flock( $self->_locks->file($path) . ".lock", LOCK_EX) );
+		$txn->set_lock( $path, $self->_get_flock( File::Spec->catfile( $self->_locks, $path . ".lock" ), LOCK_EX) );
 	}
 }
 
 sub remove_file {
 	my ( $self, $path ) = @_;
 
-	$self->lock_path_write(dirname($path));
-	$self->lock_path_write($path);
+	# lock parent for writing
+	my ( undef, $dir ) = File::Spec->splitpath($path);
+	$self->lock_path_write($dir) if $dir;
+
+	$self->lock_path_write($path, 1);
 
 	$self->_txn->add_change( bless \$path, "Directory::Transactional::Delete" );
 }
@@ -393,9 +410,10 @@ sub work_path {
 
 	$self->_txn->_changes->{$path} = $path;
 
-	my $file = $self->_txn->work->file($path);
+	my $file = File::Spec->catfile( $self->_txn->work, $path );
 
-	$file->parent->mkpath;
+	my ( undef, $dir ) = File::Spec->splitpath($path);
+	make_path( File::Spec->catdir($self->_txn->work, $dir ) ) if $dir; # FIXME only if it exists in the original?
 
 	return $file;
 }

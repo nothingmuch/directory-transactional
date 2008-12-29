@@ -17,7 +17,7 @@ my $work;
 
 	isa_ok( $d, "Directory::Transactional" );
 
-	$work = $d->work;
+	$work = $d->_work;
 
 	ok( -d $work, "work dir created" );
 

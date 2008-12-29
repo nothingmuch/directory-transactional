@@ -5,7 +5,7 @@ use warnings;
 
 use Test::More;
 
-use File::Spec;
+use File::Spec::Functions;
 
 use constant FORKS => 6;
 
@@ -72,7 +72,7 @@ foreach my $forks ( 0 .. FORKS ) {
 			alarm 5;
 			my $d = Directory::Transactional->new(
 				root => $base,
-				work => $base->subdir("work"),
+				_work => $base->subdir("work")->stringify,
 			);
 			alarm 0;
 
@@ -93,7 +93,7 @@ foreach my $forks ( 0 .. FORKS ) {
 			{
 				$d->txn_begin;
 
-				my $path = $d->work_path( my $blort = "flarb/blort_" . int(rand 10) . ".txt" );
+				my $path = $d->work_path( my $blort = catfile("flarb", "blort_" . int(rand 10) . ".txt") );
 
 				my $count = $s->exists($blort) ? $s->read($blort) : 0;
 

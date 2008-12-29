@@ -3,12 +3,17 @@
 use strict;
 use warnings;
 
+use Path::Class;
+use File::Spec::Functions;
+
 use Test::More 'no_plan';
 use Test::TempDir qw(temp_root);
 
 use ok 'Directory::Transactional';
 
-my $file = temp_root->file("foo.txt");
+my $name = catfile("foo", "foo.txt");
+my $file = temp_root->file($name);
+
 
 my $work;
 
@@ -18,14 +23,14 @@ my $work;
 	alarm 0;
 
 	isa_ok( $d, "Directory::Transactional" );
-	$work = $d->work;
+	$work = $d->_work;
 
 	ok( not(-e $file), "file does not exist" );
 
 	{
 		$d->txn_begin;
 
-		my $path = $d->work_path("foo.txt");
+		my $path = $d->work_path($name);
 
 		ok( -d $work, "work dir created" );
 
@@ -47,7 +52,7 @@ my $work;
 	{
 		$d->txn_begin;
 
-		my $outer_path = $d->work_path("foo.txt");
+		my $outer_path = $d->work_path($name);
 
 		ok( not( -e $outer_path ), "txn not yet modified" );
 
@@ -56,7 +61,7 @@ my $work;
 		{
 			$d->txn_begin;
 
-			my $path = $d->work_path("foo.txt");
+			my $path = $d->work_path($name);
 
 			open my $fh, ">", $path;
 			$fh->print("hippies\n");
@@ -69,7 +74,7 @@ my $work;
 			$d->txn_commit;
 		}
 
-		is( $outer_path->slurp, "hippies\n", "nested transaction comitted to parent" );
+		is( file($outer_path)->slurp, "hippies\n", "nested transaction comitted to parent" );
 
 		is( $file->slurp, "dancing\n", "root file not yet modified" );
 
@@ -81,7 +86,7 @@ my $work;
 	{
 		$d->txn_begin;
 
-		my $path = $d->work_path("foo.txt");
+		my $path = $d->work_path($name);
 
 		ok( -d $work, "work dir created" );
 

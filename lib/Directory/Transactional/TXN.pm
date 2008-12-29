@@ -3,7 +3,8 @@
 package Directory::Transactional::TXN;
 use Moose;
 
-use MooseX::Types::Path::Class qw(Dir);
+use File::Spec;
+use File::Path qw(make_path remove_tree);
 
 use namespace::clean -except => 'meta';
 
@@ -25,22 +26,22 @@ use Data::UUID::LibUUID (
 );
 
 has [qw(work backup)] => (
-	isa => Dir,
+	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
 );
 
 sub _build_work {
 	my $self = shift;
-	my $dir = $self->manager->_txns->subdir( $self->id );
-	$dir->mkpath;
+	my $dir = File::Spec->catdir( $self->manager->_txns, $self->id );
+	make_path($dir);
 	return $dir;
 }
 
 sub _build_backup {
 	my $self = shift;
-	my $dir = $self->manager->_backups->subdir( $self->id );
-	$dir->mkpath;
+	my $dir = File::Spec->catdir( $self->manager->_backups, $self->id );
+	make_path($dir);
 	return $dir;
 }
 
@@ -82,11 +83,11 @@ sub DEMOLISH {
 	my $self = shift;
 
 	if ( $self->has_work ) {
-		$self->work->rmtree;
+		remove_tree($self->work, {});
 	}
 
 	if ( $self->has_backup ) {
-		$self->backup->rmtree;
+		remove_tree($self->backup, {});
 	}
 }
 

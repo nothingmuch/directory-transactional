@@ -6,6 +6,8 @@ use warnings;
 use Test::More 'no_plan';
 use Test::TempDir qw(scratch);
 
+use File::Spec::Functions;
+
 use ok 'Directory::Transactional';
 
 {
@@ -23,8 +25,8 @@ use ok 'Directory::Transactional';
 	{
 		alarm 5;
 		my $d = Directory::Transactional->new(
-			root => $base->subdir("root"),
-			work => $base->subdir("work"),
+			root => $base->subdir("root")->stringify,
+			_work => $base->subdir("work")->stringify,
 		);
 		alarm 0;
 
@@ -58,8 +60,8 @@ use ok 'Directory::Transactional';
 	{
 		alarm 5;
 		my $d = Directory::Transactional->new(
-			root => $base->subdir("root"),
-			work => $base->subdir("work"),
+			root => $base->subdir("root")->stringify,
+			_work => $base->subdir("work")->stringify,
 		);
 		alarm 0;
 
