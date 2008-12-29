@@ -61,7 +61,7 @@ foreach my $forks ( 0 .. FORKS ) {
 			_exit($exit);
 		});
 
-		defined(fork) or $exit=1 and die $! for 1 .. $forks;
+		defined(fork) or $exit=1, die $! for 1 .. $forks;
 
 		srand($$); # otherwise rand returns the same in all children
 
