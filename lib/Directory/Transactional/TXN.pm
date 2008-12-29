@@ -72,7 +72,7 @@ __END__
 
 =head1 NAME
 
-Directory::Transactional::TXN - 
+Directory::Transactional::TXN - ACID transactions on a set of files with recovery
 
 =head1 SYNOPSIS
 

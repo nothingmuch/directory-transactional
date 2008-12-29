@@ -277,6 +277,43 @@ Directory::Transactional -
 
 =head1 DESCRIPTION
 
+=head1 TRANSACTIONAL SEMANTICS
+
+When the object is being constructed a nonblocking attempt to get an exclusive
+lock on the global shared lock file using L<File::NFSLock> is made.
+
+If this lock is successful this means that this object is the only active
+instance, and no other instance can access the directory for now.
+
+The work directory's state is inspected, any partially comitted transactions
+are rolled back, and all work files are cleaned up, producing a consistent
+state.
+
+At this point the exclusive lock is dropped, and a shared lock on the same file
+is taken, which will be retained for the lifetime of the object.
+
+Each transaction (root or nested) gets its own work directory, which is an
+overlay of its parent.
+
+All write operations are performed in the work directory, while read operations
+walk up the tree.
+
+Aborting a transaction consists of simply removing its work directory.
+
+Comitting a nested transaction involves overwriting its parent's work directory
+with all the changes in the child transaction's work directory.
+
+Comitting a root transaction to the root directory involves moving aside every
+file from the root to a backup directory, then applying the changes in the work
+directory to the root, moving the backup directory into the work directory, and
+then cleaning up the work directory.
+
+If at any point in the root transaction commit work is interrupted, the backup
+directory acts like a journal entry. Recovery will rollback this transaction by
+restoring all the renamed backup files. Moving the backup directory into the
+work directory signifies that the transaction has comitted successfully, and
+recovery will clean these files up normally.
+
 =cut
 
 
