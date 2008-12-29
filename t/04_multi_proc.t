@@ -7,9 +7,11 @@ use Test::More;
 
 use File::Spec;
 
+use constant FORKS => 6;
+
 BEGIN {
 	if ( File::Spec->isa("File::Spec::Unix") ) {
-		plan 'no_plan';
+		plan tests => 1 + 7 * (FORKS+1);
 	} else {
 		plan skip_all => "not running on something UNIXish";
 	}
@@ -28,7 +30,7 @@ use ok 'Directory::Transactional';
 	wrap recover => pre => sub { select(undef,undef,undef,0.2) };
 }
 
-foreach my $forks ( 0 .. 6 ) {
+foreach my $forks ( 0 .. FORKS ) {
 	my $s = scratch();
 
 	$s->create_tree({
@@ -51,15 +53,17 @@ foreach my $forks ( 0 .. 6 ) {
 	defined(my $pid = fork) or die $!;
 
 	unless ( $pid ) {
-		defined(fork) or die $! for 1 .. $forks;
+		my $exit = 0;
 
 		my $guard = Scope::Guard->new(sub {
 			# avoid cleanups on errors
 			use POSIX qw(_exit);
-			_exit(0);
+			_exit($exit);
 		});
 
-		srand(time ^ $$); # otherwise rand returns the same in all children
+		defined(fork) or $exit=1 and die $! for 1 .. $forks;
+
+		srand($$); # otherwise rand returns the same in all children
 
 		select(undef,undef,undef,0.3 * rand);
 
@@ -99,18 +103,22 @@ foreach my $forks ( 0 .. 6 ) {
 			}
 		}
 
-		while( wait	!= -1 ) { }
+		while( wait	!= -1 ) { $exit = 1 if $? }
 	}
 
 	wait;
 
-	is( $s->read('root/foo.txt'),        "the foo",   "foo.txt restored" );
-	is( $s->read('root/bar.txt'),        "the bar",   "bar.txt not touched" );
-	is( $s->read('root/blah/gorch.txt'), "the gorch", "gorch.txt restored" );
+	SKIP: {
+		skip "bad exit from child", 8 if $?;
 
-	is( $s->read("root/counter.txt"), 7 + 2 ** $forks, "counter updated the right number of times, no race conditions" );
+		is( $s->read('root/foo.txt'),        "the foo",   "foo.txt restored" );
+		is( $s->read('root/bar.txt'),        "the bar",   "bar.txt not touched" );
+		is( $s->read('root/blah/gorch.txt'), "the gorch", "gorch.txt restored" );
 
-	ok( !$s->exists('work/backups/123/foo.txt'), "foo.txt backup file removed" );
-	ok( !$s->exists('work/backups/abc/blah/gorch.txt'), "gorch.txt backup file removed" );
-	ok( !$s->exists('work/txns/5421/bar.txt'), "bar.txt tempfile removed" );
+		is( $s->read("root/counter.txt"), 7 + 2 ** $forks, "counter updated the right number of times, no race conditions" );
+
+		ok( !$s->exists('work/backups/123/foo.txt'), "foo.txt backup file removed" );
+		ok( !$s->exists('work/backups/abc/blah/gorch.txt'), "gorch.txt backup file removed" );
+		ok( !$s->exists('work/txns/5421/bar.txt'), "bar.txt tempfile removed" );
+	}
 }
