@@ -25,7 +25,7 @@ use Data::UUID::LibUUID (
 	new_dce_uuid_string => { -as => "_build_id" },
 );
 
-has [qw(work backup)] => (
+has work => (
 	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
@@ -34,13 +34,6 @@ has [qw(work backup)] => (
 sub _build_work {
 	my $self = shift;
 	my $dir = File::Spec->catdir( $self->manager->_txns, $self->id );
-	make_path($dir);
-	return $dir;
-}
-
-sub _build_backup {
-	my $self = shift;
-	my $dir = File::Spec->catdir( $self->manager->_backups, $self->id );
 	make_path($dir);
 	return $dir;
 }

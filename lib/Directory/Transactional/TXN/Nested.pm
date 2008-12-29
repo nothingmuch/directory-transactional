@@ -13,6 +13,8 @@ has parent => (
 	required => 1,
 );
 
+sub has_backup { return }
+
 has _lock_cache => (
 	isa => "HashRef",
 	is  => "ro",

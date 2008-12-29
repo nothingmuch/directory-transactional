@@ -3,6 +3,9 @@
 package Directory::Transactional::TXN::Root;
 use Moose;
 
+use File::Spec;
+use File::Path qw(make_path remove_tree);
+
 use namespace::clean -except => 'meta';
 
 extends qw(Directory::Transactional::TXN);
@@ -12,6 +15,19 @@ extends qw(Directory::Transactional::TXN);
 has global_lock => (
 	is  => "ro",
 );
+
+has backup => (
+	isa => "Str",
+	is  => "ro",
+	lazy_build => 1,
+);
+
+sub _build_backup {
+	my $self = shift;
+	my $dir = File::Spec->catdir( $self->manager->_backups, $self->id );
+	make_path($dir);
+	return $dir;
+}
 
 sub find_lock {
 	my ( $self, $path ) = @_;
