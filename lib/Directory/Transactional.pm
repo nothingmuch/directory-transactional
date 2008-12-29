@@ -308,7 +308,7 @@ Directory::Transactional -
 =head1 TRANSACTIONAL SEMANTICS
 
 When the object is being constructed a nonblocking attempt to get an exclusive
-lock on the global shared lock file using L<File::NFSLock> is made.
+lock on the global shared lock file using L<File::NFSLock> or C<flock> is made.
 
 If this lock is successful this means that this object is the only active
 instance, and no other instance can access the directory for now.
@@ -333,8 +333,8 @@ with all the changes in the child transaction's work directory.
 
 Comitting a root transaction to the root directory involves moving aside every
 file from the root to a backup directory, then applying the changes in the work
-directory to the root, moving the backup directory into the work directory, and
-then cleaning up the work directory.
+directory to the root, renaming the backup directory to a work directory, and
+then cleaning up the work directory and the renamed backup directory.
 
 If at any point in the root transaction commit work is interrupted, the backup
 directory acts like a journal entry. Recovery will rollback this transaction by
