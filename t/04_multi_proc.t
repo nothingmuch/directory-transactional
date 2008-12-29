@@ -28,7 +28,7 @@ use ok 'Directory::Transactional';
 	wrap recover => pre => sub { select(undef,undef,undef,0.2) };
 }
 
-{
+foreach my $forks ( 0 .. 6 ) {
 	my $s = scratch();
 
 	$s->create_tree({
@@ -49,8 +49,6 @@ use ok 'Directory::Transactional';
 	my $base = $s->base;
 
 	defined(my $pid = fork) or die $!;
-
-	my $forks = 6;
 
 	unless ( $pid ) {
 		defined(fork) or die $! for 1 .. $forks;
