@@ -3,6 +3,7 @@
 package Directory::Transactional::TXN;
 use Squirrel;
 
+use Set::Object;
 use File::Spec;
 use File::Path qw(make_path remove_tree);
 
@@ -38,10 +39,16 @@ sub _build_work {
 	return $dir;
 }
 
-has [qw(_changes _locks _deleted)] => (
+has _locks => (
 	isa => "HashRef",
 	is  => "ro",
 	default => sub { {} },
+);
+
+has changed => (
+	isa => "Set::Object",
+	is  => "ro",
+	default => sub { Set::Object->new },
 );
 
 has [qw(downgrade)] => (
@@ -50,11 +57,19 @@ has [qw(downgrade)] => (
 	default => sub { [] },
 );
 
-sub propagate_locks {
+sub propagate {
 	my $self = shift;
 
-	my $l = $self->_locks;
-	@{ $self->parent->_locks }{ keys %$l } = values %$l;
+	my $p = $self->parent;
+
+	foreach my $field ( qw(_locks) ) {
+		my $h = $self->$field;
+		@{ $self->parent->$field }{ keys %$h } = values %$h;
+	}
+
+	$self->parent->changed->insert($self->changed->members);
+
+	return;
 }
 
 sub set_lock {
@@ -67,9 +82,10 @@ sub get_lock {
 	$self->_locks->{$path};
 }
 
-sub changes {
-	my $self = shift;
-	return [ values %{ $self->_changes } ];
+sub is_changed {
+	my ( $self, $path ) = @_;
+
+	$self->changed->includes($path);
 }
 
 sub DEMOLISH {
@@ -84,14 +100,9 @@ sub DEMOLISH {
 	}
 }
 
-sub add_change {
-	my ( $self, $change ) = @_;
-
-	if ( ref $change ) {
-		$self->_deleted->{$$change} = 1;
-	}
-
-	push @{ $self->_changes }, $change;
+sub mark_changed {
+	my ( $self, @args ) = @_;
+	$self->changed->insert(@args);
 }
 
 __PACKAGE__->meta->make_immutable;

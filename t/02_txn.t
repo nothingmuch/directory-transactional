@@ -102,6 +102,108 @@ my $work;
 	}
 
 	is( $file->slurp, "hippies\n", "root file unmodified" );
+
+
+	{
+		$d->txn_begin;
+
+		ok( -e $file, "file exists" );
+		is( $file->slurp, "hippies\n", "unmodified" );
+
+		ok( !$d->is_deleted($name), "not marked as deleted" );
+
+		$d->remove_file($name);
+
+		ok( $d->is_deleted($name), "marked as deleted" );
+
+		ok( -e $file, "file still exists" );
+		is( $file->slurp, "hippies\n", "unmodified" );
+
+		$d->txn_commit;
+
+		ok( not(-e $file), "file removed" );
+	}
+
+	$file->openw->print("hippies\n");
+
+	{
+		$d->txn_begin;
+
+		ok( -e $file, "file exists" );
+		is( $file->slurp, "hippies\n", "unmodified" );
+
+		ok( !$d->is_deleted($name), "not marked as deleted" );
+
+		{
+			$d->txn_begin;
+
+			ok( !$d->is_deleted($name), "not marked as deleted" );
+
+			$d->remove_file($name);
+
+			ok( $d->is_deleted($name), "marked as deleted" );
+
+			ok( -e $file, "file still exists" );
+			is( $file->slurp, "hippies\n", "unmodified" );
+
+			$d->txn_commit;
+		}
+
+		ok( $d->is_deleted($name), "marked as deleted" );
+
+		ok( -e $file, "file still exists" );
+		is( $file->slurp, "hippies\n", "unmodified" );
+
+		$d->txn_commit;
+
+		ok( not(-e $file), "file removed" );
+	}
+
+	$file->openw->print("hippies\n");
+
+	{
+		my $targ = temp_root->file('oi_vey.txt');
+
+		$d->txn_begin;
+
+		ok( -e $file, "file exists" );
+		is( $file->slurp, "hippies\n", "unmodified" );
+
+		ok( !$d->is_deleted($name), "not marked as deleted" );
+
+		{
+			$d->txn_begin;
+
+			ok( !$d->is_deleted($name), "not marked as deleted" );
+			ok( $d->is_deleted("oi_vey.txt"), "target file is considered deleted" );
+
+			$d->rename_file($name, "oi_vey.txt");
+
+			ok( !$d->is_deleted("oi_vey.txt"), "renamed not deleted" );
+
+			ok( -e $d->work_path("oi_vey.txt"), "target exists in the txn dir" );
+
+			ok( $d->is_deleted($name), "marked as deleted" );
+
+			ok( -e $file, "file still exists" );
+			is( $file->slurp, "hippies\n", "unmodified" );
+
+			$d->txn_commit;
+		}
+
+		ok( $d->is_deleted($name), "marked as deleted" );
+
+		ok( -e $file, "file still exists" );
+		is( $file->slurp, "hippies\n", "unmodified" );
+
+		$d->txn_commit;
+
+		ok( not(-e $file), "file removed" );
+
+		ok( -e $targ, "target file exists" );
+
+		is( $targ->slurp, "hippies\n", "contents" );
+	}
 }
 
 ok( not( -d $work ), "work dir removed" );

@@ -4,12 +4,15 @@
 package Directory::Transactional;
 use Squirrel;
 
+use Set::Object;
+
 use Carp;
 use Fcntl qw(LOCK_EX LOCK_SH LOCK_NB);
 
 use File::Spec;
 use File::Find qw(find);
 use File::Path qw(make_path remove_tree);
+use File::Copy;
 use IO::Dir;
 
 use Directory::Transactional::TXN::Root;
@@ -213,7 +216,7 @@ sub recover {
 			my $files = $self->get_file_list($txn_backup);
 
 			# move all the backups back into the root directory
-			$self->merge_overlay( from => $txn_backup, to => $self->_root, changes => $files );
+			$self->merge_overlay( from => $txn_backup, to => $self->_root, files => $files );
 
 			remove_tree($txn_backup);
 		}
@@ -229,24 +232,24 @@ sub recover {
 sub get_file_list {
 	my ( $self, $from ) = @_;
 
-	my @files;
+	my $files = Set::Object->new;
 
-	find( { no_chdir => 1, wanted   => sub { push @files, File::Spec->abs2rel($_, $from) if -f $_ } }, $from );
+	find( { no_chdir => 1, wanted   => sub { $files->insert( File::Spec->abs2rel($_, $from) ) if -f $_ } }, $from );
 
-	return \@files;
+	return $files;
 }
 
 sub merge_overlay {
 	my ( $self, %args ) = @_;
 
-	my ( $from, $to, $backup, $changes ) = @args{qw(from to backup changes)};
+	my ( $from, $to, $backup, $files ) = @args{qw(from to backup files)};
+
+	my @rem;
 
 	# if requested, back up first by moving all the files from the target
 	# directory to the backup directory
 	if ( $backup ) {
-		foreach my $change ( @$changes ) {
-			my $file = ref $change ? $$change : $change; # get the filename if the change is a deletion
-
+		foreach my $file ( $files->members ) {
 			my $src = File::Spec->catfile($to, $file);
 
 			next unless -e $src; # there is no source file to back
@@ -264,13 +267,11 @@ sub merge_overlay {
 	}
 
 	# then apply all the changes to the target dir from the source dir
-	foreach my $change ( @$changes ) {
-		my $targ = File::Spec->catfile($to,$change);
-		if ( ref $change ) {
-			# a reference signifies a deletion
-			unlink $targ or die $!;
-		} else {
-			my $src = File::Spec->catfile($from,$change);
+	foreach my $file ( $files->members ) {
+		my $src = File::Spec->catfile($from,$file);
+
+		if ( -f $src ) {
+			my $targ = File::Spec->catfile($to,$file);
 
 			# make sure the parent directory in the target path exists first
 			my ( undef, $dir ) = File::Spec->splitpath($targ);
@@ -278,7 +279,11 @@ sub merge_overlay {
 				make_path($dir) unless -d $dir;
 			}
 
-			rename $src => $targ or die $!;
+			if ( -f $src ) {
+				rename $src => $targ or die $!;
+			} elsif ( -f $targ ) {
+				unlink $targ or die $!;
+			}
 		}
 	}
 }
@@ -326,22 +331,22 @@ sub txn_commit {
 
 	my $txn = $self->_pop_txn;
 
-	my $changes = $txn->changes;
+	my $changed = $txn->changed;
 
-	if ( @$changes ) {
+	if ( $changed->size ) {
 		if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
 			# commit the work, backing up in the backup dir
-			$self->merge_overlay( from => $txn->work, to => $self->_root, backup => $txn->backup, changes => $changes );
+			$self->merge_overlay( from => $txn->work, to => $self->_root, backup => $txn->backup, files => $changed );
 
 			# we're finished, remove backup dir denoting successful commit
 			rename $txn->backup, $txn->work . ".cleanup" or die $!;
 		} else {
 			# it's a nested transaction, which means we don't need to be
 			# careful about comitting to the parent, just share all the locks,
-			# and merge it
-			$txn->propagate_locks;
+			# deletion metadata etc by merging it
+			$txn->propagate;
 
-			$self->merge_overlay( from => $txn->work, to => $txn->parent->work, changes => $changes );
+			$self->merge_overlay( from => $txn->work, to => $txn->parent->work, files => $changed );
 		}
 
 		# clean up work dir and backup dir
@@ -412,7 +417,7 @@ sub lock_path_write {
 	unless ( $skip_parent ) {
 		my ( undef, $dir ) = File::Spec->splitpath($path);
 		$self->lock_path_read($dir) if $dir;
-	}
+}
 
 	my $txn = $self->_txn;
 
@@ -434,6 +439,38 @@ sub lock_path_write {
 	}
 }
 
+sub _txn_for_path {
+	my ( $self, $path ) = @_;
+
+	my $txn = $self->_txn;
+
+	do {
+		if ( $txn->is_changed($path) ) {
+			return $txn;
+		};
+	} while ( $txn->can("parent") and $txn = $txn->parent );
+
+	return;
+}
+
+sub _locate_path_in_overlays {
+	my ( $self, $path ) = @_;
+
+	if ( my $txn = $self->_txn_for_path($path) ) {
+		File::Spec->catfile($txn->work, $path);
+	} else {
+		$self->lock_path_read($path);
+		File::Spec->catfile($self->_root, $path);
+	}
+}
+
+
+sub is_deleted {
+	my ( $self, $path ) = @_;
+
+	return not -e $self->_locate_path_in_overlays($path);
+}
+
 sub remove_file {
 	my ( $self, $path ) = @_;
 
@@ -441,9 +478,45 @@ sub remove_file {
 	my ( undef, $dir ) = File::Spec->splitpath($path);
 	$self->lock_path_write($dir) if $dir;
 
-	$self->lock_path_write($path, 1);
+	my $txn_file = $self->work_path($path);
 
-	$self->_txn->add_change( bless \$path, "Directory::Transactional::Delete" );
+	if ( -e $txn_file ) {
+		unlink $txn_file or die $!;
+	} else {
+		return 1;
+	}
+}
+
+sub rename_file {
+	my ( $self, $from, $to ) = @_;
+
+	foreach my $path ( $from, $to ) {
+		# lock parents for writing
+		my ( undef, $dir ) = File::Spec->splitpath($path);
+		$self->lock_path_write($dir) if $dir;
+	}
+
+	$self->vivify_path($from),
+
+	rename (
+		$self->work_path($from),
+		$self->work_path($to),
+	) or die $!;
+}
+
+sub vivify_path {
+	my ( $self, $path ) = @_;
+
+	my $txn_path = File::Spec->catfile( $self->_txn->work, $path );
+
+	unless ( -e $txn_path ) {
+		my ( undef, $dir ) = File::Spec->splitpath($path);
+		make_path( File::Spec->catdir($self->_txn->work, $dir ) ) if $dir; # FIXME only if it exists in the original?
+
+		copy( $self->_locate_path_in_overlays($path), $txn_path ) or die $!;
+	}
+
+	return $txn_path;
 }
 
 sub work_path {
@@ -451,7 +524,7 @@ sub work_path {
 
 	$self->lock_path_write($path);
 
-	$self->_txn->_changes->{$path} = $path;
+	$self->_txn->mark_changed($path);
 
 	my $file = File::Spec->catfile( $self->_txn->work, $path );
 

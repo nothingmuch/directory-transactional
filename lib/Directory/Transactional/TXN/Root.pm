@@ -34,11 +34,6 @@ sub find_lock {
 	$self->get_lock($path);
 }
 
-sub is_deleted {
-	my ( $self, $path ) = @_;
-	$self->_deleted->{$path};
-}
-
 __PACKAGE__->meta->make_immutable;
 
 __PACKAGE__
