@@ -336,7 +336,9 @@ sub lock_path_read {
 
 	return if $self->nfs;
 
-	# FIXME read lock parents
+	if ( (my $dir = dirname($path)) ne '.' ) {
+		$self->lock_path_read($dir);
+	}
 
 	my $txn = $self->_txn;
 
@@ -351,7 +353,9 @@ sub lock_path_write {
 
 	return if $self->nfs;
 
-	# FIXME read lock parents
+	if ( (my $dir = dirname($path)) ne '.' ) {
+		$self->lock_path_read($dir);
+	}
 
 	my $txn = $self->_txn;
 
@@ -376,9 +380,10 @@ sub lock_path_write {
 sub remove_file {
 	my ( $self, $path ) = @_;
 
+	$self->lock_path_write(dirname($path));
 	$self->lock_path_write($path);
 
-	$self->_txn->_changes->{$path} = bless \$path, "Directory::Transactional::Delete";
+	$self->_txn->add_change( bless \$path, "Directory::Transactional::Delete" );
 }
 
 sub work_path {
@@ -387,7 +392,12 @@ sub work_path {
 	$self->lock_path_write($path);
 
 	$self->_txn->_changes->{$path} = $path;
-	$self->_txn->work->file($path);
+
+	my $file = $self->_txn->work->file($path);
+
+	$file->parent->mkpath;
+
+	return $file;
 }
 
 __PACKAGE__->meta->make_immutable;

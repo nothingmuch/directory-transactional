@@ -35,11 +35,11 @@ foreach my $forks ( 0 .. FORKS ) {
 
 	$s->create_tree({
 		# inconsistent state:
-		'root/foo.txt'     => "les foo",
-		'root/bar.txt'     => "the bar",
-		'root/baz.txt'     => "the baz",
-		'root/gorch.txt'   => "los gorch",
-		'root/counter.txt' => "7",
+		'foo.txt'   => "les foo",
+		'bar.txt'   => "the bar",
+		'baz.txt'   => "the baz",
+		'gorch.txt' => "los gorch",
+		'bloo/blah/counter.txt' => "7",
 
 		# some backups
 		'work/backups/123/foo.txt'   => "the foo",
@@ -71,7 +71,7 @@ foreach my $forks ( 0 .. FORKS ) {
 		{
 			alarm 5;
 			my $d = Directory::Transactional->new(
-				root => $base->subdir("root"),
+				root => $base,
 				work => $base->subdir("work"),
 			);
 			alarm 0;
@@ -79,9 +79,9 @@ foreach my $forks ( 0 .. FORKS ) {
 			{
 				$d->txn_begin;
 
-				my $path = $d->work_path("counter.txt");
+				my $path = $d->work_path("bloo/blah/counter.txt");
 
-				my $count = $s->read("root/counter.txt");
+				my $count = $s->read("bloo/blah/counter.txt");
 
 				open my $fh, ">", $path or die $!;
 				$fh->print( $count + 1, "\n" );
@@ -93,9 +93,9 @@ foreach my $forks ( 0 .. FORKS ) {
 			{
 				$d->txn_begin;
 
-				my $path = $d->work_path( my $blort = "blort_" . int(rand 10) . ".txt" );
+				my $path = $d->work_path( my $blort = "flarb/blort_" . int(rand 10) . ".txt" );
 
-				my $count = $s->exists("root/$blort") ? $s->read("root/$blort") : 0;
+				my $count = $s->exists($blort) ? $s->read($blort) : 0;
 
 				select(undef,undef,undef,0.05);
 
@@ -115,17 +115,17 @@ foreach my $forks ( 0 .. FORKS ) {
 	SKIP: {
 		skip "bad exit from child", 9 if $?;
 
-		is( $s->read('root/foo.txt'),   "the foo",   "foo.txt restored" );
-		is( $s->read('root/bar.txt'),   "the bar",   "bar.txt not touched" );
-		is( $s->read('root/baz.txt'),   "the baz",   "baz.txt not touched" );
-		is( $s->read('root/gorch.txt'), "the gorch", "gorch.txt restored" );
+		is( $s->read('foo.txt'),   "the foo",   "foo.txt restored" );
+		is( $s->read('bar.txt'),   "the bar",   "bar.txt not touched" );
+		is( $s->read('baz.txt'),   "the baz",   "baz.txt not touched" );
+		is( $s->read('gorch.txt'), "the gorch", "gorch.txt restored" );
 
-		is( $s->read("root/counter.txt"), 7 + 2 ** $forks, "counter updated the right number of times, no race conditions" );
+		is( $s->read("bloo/blah/counter.txt"), 7 + 2 ** $forks, "counter updated the right number of times, no race conditions" );
 
 		my $sum = 0;
 
 		for ( 0 .. 9 ) {
-			if ( $s->exists(my $file = "root/blort_${_}.txt" ) ) {
+			if ( $s->exists(my $file = "flarb/blort_${_}.txt" ) ) {
 				$sum += $s->read($file);
 			}
 		}

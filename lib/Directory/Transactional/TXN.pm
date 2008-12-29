@@ -44,7 +44,7 @@ sub _build_backup {
 	return $dir;
 }
 
-has [qw(_changes _locks)] => (
+has [qw(_changes _locks _deleted)] => (
 	isa => "HashRef",
 	is  => "ro",
 	default => sub { {} },
@@ -88,6 +88,16 @@ sub DEMOLISH {
 	if ( $self->has_backup ) {
 		$self->backup->rmtree;
 	}
+}
+
+sub add_change {
+	my ( $self, $change ) = @_;
+
+	if ( ref $change ) {
+		$self->_deleted->{$$change} = 1;
+	}
+
+	push @{ $self->_changes }, $change;
 }
 
 __PACKAGE__->meta->make_immutable;

@@ -35,6 +35,12 @@ sub find_lock {
 	}
 }
 
+sub is_deleted {
+	my ( $self, $path ) = @_;
+
+	$self->_deleted->{$path} //= ( $self->parent->is_deleted($path) || 0 );
+}
+
 __PACKAGE__->meta->make_immutable;
 
 __PACKAGE__
