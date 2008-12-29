@@ -471,13 +471,31 @@ __END__
 
 =head1 NAME
 
-Directory::Transactional - 
+Directory::Transactional - ACID transactions on a set of files with
+journalling/recovery using C<flock> or L<File::NFSLock>
 
 =head1 SYNOPSIS
 
 	use Directory::Transactional;
 
+	my $d = Directory::Transactional->new( root => $path );
+
+	$d->txn_begin;
+
+	$d->txn_commit;
+
 =head1 DESCRIPTION
+
+This module provides lock based transactions over a set of files with full
+supported for nested transactions.
+
+=head1 ACID GUARANTEES
+
+Transactions are atomic (using locks), consistent (a recovery mode is able to
+restore the state of the directory if a process crashed while comitting a
+transaction), isolated (each transaction works in its own temporary directory,
+and durable (once C<txn_commit> returns a software crash will not call the
+transaction to rollback).
 
 =head1 TRANSACTIONAL SEMANTICS
 
