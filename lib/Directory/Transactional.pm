@@ -4,7 +4,6 @@ package Directory::Transactional;
 use Moose;
 
 use Carp;
-use File::NFSLock;
 use Path::Class;
 use Fcntl qw(LOCK_EX LOCK_SH LOCK_NB);
 
@@ -26,6 +25,38 @@ has work => (
 	is  => "ro",
 	lazy_build => 1,
 );
+
+has nfs => (
+	isa => "Bool",
+	is  => "ro",
+	default => 0,
+);
+
+sub _get_lock {
+	my ( $self, $file, $mode ) = @_;
+
+	if ( $self->nfs ) {
+		require File::NFSLock;
+		if ( my $lock = File::NFSLock->new({
+			file      => $file,
+			lock_type => $mode,
+		}) ) {
+			return $lock;
+		} elsif ( not($mode & LOCK_NB) ) {
+			die $File::NFSLock::errstr;
+		}
+	} else {
+		open my $fh, "+>", $file;
+
+		if ( flock($fh, $mode) ) {
+			return $fh;
+		} elsif ( not($mode & LOCK_NB) ) {
+			die $!;
+		}
+	}
+
+	return;
+}
 
 has _txn => (
 	isa => "Directory::Transactional::TXN",
@@ -52,15 +83,14 @@ has _backups => (
 sub _build__backups { shift->work->subdir("backups") }
 
 has _shared_lock_file => (
-	isa => File,
+	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
 );
 
-sub _build__shared_lock_file { shift->work->file("shared_lock") }
+sub _build__shared_lock_file { shift->work . ".lock" }
 
 has shared_lock => (
-	isa => "File::NFSLock",
 	is  => "ro",
 	lazy_build => 1,
 );
@@ -68,33 +98,26 @@ has shared_lock => (
 sub _build_shared_lock {
 	my $self = shift;
 
-	my $file = $self->_shared_lock_file->stringify;
+	my $file = $self->_shared_lock_file;
 
-	if ( my $ex_lock = File::NFSLock->new({
-			file      => $file,
-			lock_type => LOCK_EX|LOCK_NB,
-		}) ) {
+	if ( my $ex_lock = $self->_get_lock( $file, LOCK_EX|LOCK_NB ) ) {
 		# we have an exclusive lock, which means no other process is working on
 		# this yet, they will be blocked on the shared lock below
 		$self->recover;
 
-		$ex_lock->unlock;
 		undef $ex_lock;
 	}
 
-	File::NFSLock->new({
-		file      => $file,
-		lock_type => LOCK_SH,
-	}) || croak "Could not obtain shared global lock";
+	$self->_get_lock($file, LOCK_SH);
 }
 
 sub BUILD {
 	my $self = shift;
 
-	$self->work->mkpath;
-
 	# obtains the shared lock, running recovery if needed
 	$self->shared_lock;
+
+	$self->work->mkpath;
 }
 
 sub DEMOLISH {
@@ -105,13 +128,20 @@ sub DEMOLISH {
 		$self->txn_rollback;
 	}
 
-	$self->shared_lock->unlock;
 	$self->clear_shared_lock;
 
-	# try to clean up but not too hard
-	rmdir $self->_txns;
-	rmdir $self->_backups;
-	rmdir $self->work;
+	# cleanup workdirs
+	# only remove if no other workers are active, so that there is no race
+	# condition in their directory creation code
+	if ( my $ex_lock = $self->_get_lock( $self->_shared_lock_file, LOCK_EX|LOCK_NB ) ) {
+		# we don't really care if there's an error
+		rmdir $self->_txns;
+		rmdir $self->_backups;
+		unlink $self->work->file("txn_lock");
+		rmdir $self->work;
+
+		unlink $self->_shared_lock_file;
+	}
 }
 
 sub recover {
@@ -192,11 +222,8 @@ sub txn_begin {
 		);
 	} else {
 		$txn = Directory::Transactional::TXN::Root->new(
-			manager => $self,
-			global_lock => File::NFSLock->new({
-				file      => $self->work->file("work_lock")->stringify,
-				lock_type => LOCK_EX,
-			}),
+			manager     => $self,
+			global_lock => $self->_get_lock( $self->work->file("txn_lock")->stringify, LOCK_EX ),
 		);
 	}
 

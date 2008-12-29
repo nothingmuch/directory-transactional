@@ -8,14 +8,9 @@ use namespace::clean -except => 'meta';
 extends qw(Directory::Transactional::TXN);
 
 has global_lock => (
-	isa => "File::NFSLock",
 	is  => "ro",
 	required => 1,
 );
-
-sub DEMOLISH {
-	shift->global_lock->unlock;
-}
 
 __PACKAGE__->meta->make_immutable;
 
