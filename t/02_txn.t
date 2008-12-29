@@ -112,7 +112,7 @@ my $work;
 
 		ok( !$d->is_deleted($name), "not marked as deleted" );
 
-		$d->remove_file($name);
+		$d->unlink($name);
 
 		ok( $d->is_deleted($name), "marked as deleted" );
 
@@ -139,7 +139,7 @@ my $work;
 
 			ok( !$d->is_deleted($name), "not marked as deleted" );
 
-			$d->remove_file($name);
+			$d->unlink($name);
 
 			ok( $d->is_deleted($name), "marked as deleted" );
 
@@ -177,11 +177,16 @@ my $work;
 			ok( !$d->is_deleted($name), "not marked as deleted" );
 			ok( $d->is_deleted("oi_vey.txt"), "target file is considered deleted" );
 
-			$d->rename_file($name, "oi_vey.txt");
+			$d->rename($name, "oi_vey.txt");
 
 			ok( !$d->is_deleted("oi_vey.txt"), "renamed not deleted" );
 
 			ok( -e $d->work_path("oi_vey.txt"), "target exists in the txn dir" );
+
+			my $stat = $d->stat("oi_vey.txt");
+			is( $stat->nlink, 1, "file has one link (stat)" );
+
+			ok( !$d->old_stat($name), "no stat for source file" );
 
 			ok( $d->is_deleted($name), "marked as deleted" );
 

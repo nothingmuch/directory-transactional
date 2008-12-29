@@ -195,11 +195,11 @@ sub DEMOLISH {
 		rmdir $self->_work;
 		rmdir $self->_txns;
 		rmdir $self->_backups;
-		unlink $self->_txn_lock_file;
+		CORE::unlink $self->_txn_lock_file;
 
 		rmdir $self->_work;
 
-		unlink $self->_shared_lock_file;
+		CORE::unlink $self->_shared_lock_file;
 	}
 }
 
@@ -262,7 +262,7 @@ sub merge_overlay {
 				make_path($dir) unless -d $dir;
 			}
 
-			rename $src, $targ or die $!;
+			CORE::rename $src, $targ or die $!;
 		}
 	}
 
@@ -280,9 +280,9 @@ sub merge_overlay {
 			}
 
 			if ( -f $src ) {
-				rename $src => $targ or die $!;
+				CORE::rename $src => $targ or die $!;
 			} elsif ( -f $targ ) {
-				unlink $targ or die $!;
+				CORE::unlink $targ or die $!;
 			}
 		}
 	}
@@ -339,7 +339,7 @@ sub txn_commit {
 			$self->merge_overlay( from => $txn->work, to => $self->_root, backup => $txn->backup, files => $changed );
 
 			# we're finished, remove backup dir denoting successful commit
-			rename $txn->backup, $txn->work . ".cleanup" or die $!;
+			CORE::rename $txn->backup, $txn->work . ".cleanup" or die $!;
 		} else {
 			# it's a nested transaction, which means we don't need to be
 			# careful about comitting to the parent, just share all the locks,
@@ -464,14 +464,31 @@ sub _locate_path_in_overlays {
 	}
 }
 
+sub old_stat {
+	my ( $self, $path ) = @_;
+
+	CORE::stat($self->_locate_path_in_overlays($path));
+}
+
+sub stat {
+	my ( $self, $path ) = @_;
+
+	require File::stat;
+	File::stat::stat($self->_locate_path_in_overlays($path));
+}
 
 sub is_deleted {
 	my ( $self, $path ) = @_;
 
-	return not -e $self->_locate_path_in_overlays($path);
+	not $self->exists($path);
 }
 
-sub remove_file {
+sub exists {
+	my ( $self, $path ) = @_;
+	return -e $self->_locate_path_in_overlays($path);
+}
+
+sub unlink {
 	my ( $self, $path ) = @_;
 
 	# lock parent for writing
@@ -481,13 +498,13 @@ sub remove_file {
 	my $txn_file = $self->work_path($path);
 
 	if ( -e $txn_file ) {
-		unlink $txn_file or die $!;
+		CORE::unlink $txn_file or die $!;
 	} else {
 		return 1;
 	}
 }
 
-sub rename_file {
+sub rename {
 	my ( $self, $from, $to ) = @_;
 
 	foreach my $path ( $from, $to ) {
@@ -498,7 +515,7 @@ sub rename_file {
 
 	$self->vivify_path($from),
 
-	rename (
+	CORE::rename (
 		$self->work_path($from),
 		$self->work_path($to),
 	) or die $!;
