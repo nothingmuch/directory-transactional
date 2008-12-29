@@ -79,7 +79,7 @@ sub _get_flock {
 	# create the parent directory for the lock if necessary
 	# (the lock dir is cleaned on destruction)
 	my ( $vol, $dir ) = File::Spec->splitpath($file);
-	my $parent = File::Spec->catpath($vol, $dir);
+	my $parent = File::Spec->catpath($vol, $dir, '');
 	make_path($parent) unless -d $parent;
 
 	# open the lockfile, creating if necessary
