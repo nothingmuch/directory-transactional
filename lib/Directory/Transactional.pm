@@ -1,0 +1,282 @@
+#!/usr/bin/perl
+
+package Directory::Transactional;
+use Moose;
+
+use Carp;
+use File::NFSLock;
+use Path::Class;
+use Fcntl qw(LOCK_EX LOCK_SH LOCK_NB);
+
+use MooseX::Types::Path::Class qw(Dir File);
+
+use Directory::Transactional::TXN::Root;
+use Directory::Transactional::TXN::Nested;
+
+use namespace::clean -except => 'meta';
+
+has root => (
+	isa => Dir,
+	is  => "ro",
+	required => 1,
+);
+
+has work => (
+	isa => Dir,
+	is  => "ro",
+	lazy_build => 1,
+);
+
+has _txn => (
+	isa => "Directory::Transactional::TXN",
+	is  => "rw",
+	clearer => "_clear_txn",
+);
+
+sub _build_work { shift->root->subdir(".txn_work_dir") }
+
+has _txns => (
+	isa => Dir,
+	is  => "ro",
+	lazy_build => 1,
+);
+
+sub _build__txns { shift->work->subdir("txns") }
+
+has _backups => (
+	isa => Dir,
+	is  => "ro",
+	lazy_build => 1,
+);
+
+sub _build__backups { shift->work->subdir("backups") }
+
+has _shared_lock_file => (
+	isa => File,
+	is  => "ro",
+	lazy_build => 1,
+);
+
+sub _build__shared_lock_file { shift->work->file("shared_lock") }
+
+has shared_lock => (
+	isa => "File::NFSLock",
+	is  => "ro",
+	lazy_build => 1,
+);
+
+sub _build_shared_lock {
+	my $self = shift;
+
+	my $file = $self->_shared_lock_file->stringify;
+
+	if ( my $ex_lock = File::NFSLock->new({
+			file      => $file,
+			lock_type => LOCK_EX|LOCK_NB,
+		}) ) {
+		# we have an exclusive lock, which means no other process is working on
+		# this yet, they will be blocked on the shared lock below
+		$self->recover;
+
+		$ex_lock->unlock;
+		undef $ex_lock;
+	}
+
+	File::NFSLock->new({
+		file      => $file,
+		lock_type => LOCK_SH,
+	}) || croak "Could not obtain shared global lock";
+}
+
+sub BUILD {
+	my $self = shift;
+
+	$self->work->mkpath;
+
+	# obtains the shared lock, running recovery if needed
+	$self->shared_lock;
+}
+
+sub DEMOLISH {
+	my $self = shift;
+
+	# rollback any open txns
+	while ( $self->_txn ) {
+		$self->txn_rollback;
+	}
+
+	$self->shared_lock->unlock;
+	$self->clear_shared_lock;
+
+	# try to clean up but not too hard
+	rmdir $self->_txns;
+	rmdir $self->_backups;
+	rmdir $self->work;
+}
+
+sub recover {
+	my $self = shift;
+
+	# rollback partially comitted transactions
+	if ( -d $self->_backups ) {
+		foreach my $txn_backup ( $self->_backups->children ) {
+			$self->merge_overlay( $txn_backup => $self->root );
+			$txn_backup->rmtree;
+		}
+	}
+
+	# delete all temp files (fully comitted but not cleaned up transactions,
+	# and uncomitted transactions)
+	if ( -d $self->_txns ) {
+		$self->_txns->rmtree({ keep_root => 1 });
+	}
+}
+
+sub get_file_list {
+	my ( $self, $from ) = @_;
+
+	my @files;
+	
+	dir($from)->recurse(
+		callback => sub {
+			my $file = shift;
+
+			my $rel = $file->relative($from);
+			push @files, $rel;
+		},
+	);
+
+	return @files;
+}
+
+sub merge_overlay {
+	my ( $self, $from, $to, $backup ) = @_;
+
+	my @files = $self->get_file_list($from);
+
+	if ( $backup ) {
+		foreach my $file ( @files ) {
+			my $src = $to->file($file);
+
+			next unless -e $src;
+
+			my $targ = $backup->file($file);
+
+			my $p = $targ->parent;
+			$p->mkpath unless -d $p;
+
+			rename $src, $targ;
+		}
+	}
+
+	foreach my $file ( @files ) {
+		my $src = $from->file($file);
+		my $targ = $to->file($file);
+
+		my $p = $targ->parent;
+		$p->mkpath unless -d $p;
+
+		rename $src => $targ;
+	}
+}
+
+sub txn_begin {
+	my $self = shift;
+
+	my $txn;
+
+	if ( my $p = $self->_txn ) {
+		$txn = Directory::Transactional::TXN::Nested->new(
+			parent => $p,
+			manager => $self,
+		);
+	} else {
+		$txn = Directory::Transactional::TXN::Root->new(
+			manager => $self,
+			global_lock => File::NFSLock->new({
+				file      => $self->work->file("work_lock")->stringify,
+				lock_type => LOCK_EX,
+			}),
+		);
+	}
+
+	$self->_txn($txn);
+
+	return;
+}
+
+sub _pop_txn {
+	my $self = shift;
+
+	my $txn = $self->_txn;
+
+	if ( $txn->isa("Directory::Transactional::TXN::Nested") ) {
+		$self->_txn( $txn->parent );
+	} else {
+		$self->_clear_txn;
+	}
+
+	return $txn;
+}
+
+sub txn_commit {
+	my $self = shift;
+
+	my $txn = $self->_pop_txn;
+
+	if ( $txn->has_work ) {
+		if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
+			# commit the work, backing up in the backup dir
+			$self->merge_overlay( $txn->work, $self->root, $txn->backup );
+
+			# we're finished, remove backup dir denoting successful commit
+			rename $txn->backup, $txn->work->subdir(join "_", ".", "txn_backups", $$, time, int rand 10000);
+			$txn->clear_backup;
+		} else {
+			# it's a nested transaction, which means we don't need to be
+			# careful about comitting to the parent, just merge it
+			$self->merge_overlay( $txn->work, $self->_txn->work );
+		}
+
+		# clean up work dir
+		$txn->work->rmtree;
+		$txn->clear_work;
+	}
+
+	return;
+}
+
+sub txn_rollback {
+	my $self = shift;
+
+	$self->_pop_txn;
+
+	return;
+}
+
+sub work_path {
+	my ( $self, $path ) = @_;
+	$self->_txn->work->file($path);
+}
+
+__PACKAGE__->meta->make_immutable;
+
+__PACKAGE__
+
+__END__
+
+=pod
+
+=head1 NAME
+
+Directory::Transactional - 
+
+=head1 SYNOPSIS
+
+	use Directory::Transactional;
+
+=head1 DESCRIPTION
+
+=cut
+
+
