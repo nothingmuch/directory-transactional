@@ -257,7 +257,7 @@ sub txn_commit {
 			$self->merge_overlay( $txn->work, $self->root, $txn->backup );
 
 			# we're finished, remove backup dir denoting successful commit
-			rename $txn->backup, $txn->work->subdir(join "_", ".", "txn_backups", $$, time, int rand 10000);
+			rename $txn->backup, $txn->work . ".cleanup";
 			$txn->clear_backup;
 		} else {
 			# it's a nested transaction, which means we don't need to be
@@ -267,6 +267,7 @@ sub txn_commit {
 
 		# clean up work dir
 		$txn->work->rmtree;
+		dir($txn->work . ".cleanup")->rmtree;
 		$txn->clear_work;
 	}
 
