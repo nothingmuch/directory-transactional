@@ -382,6 +382,7 @@ sub lock_path_read {
 
 	return if $self->global_lock;
 
+	my $txn = $self->_txn or return;
 
 	# create a list of ancestor directories
 	my @paths;
@@ -396,9 +397,6 @@ sub lock_path_read {
 			}
 		}
 	}
-
-
-	my $txn = $self->_txn;
 
 	foreach my $path ( @paths, $path ) {
 		# any type of lock in this or any parent transaction is going to be good enough
