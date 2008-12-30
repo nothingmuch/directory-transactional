@@ -214,7 +214,7 @@ sub recover {
 
 			my $txn_backup = File::Spec->catdir($b, $name); # each of these is one transaction
 
-			my $files = $self->get_file_list($txn_backup);
+			my $files = $self->_get_file_list($txn_backup);
 
 			# move all the backups back into the root directory
 			$self->merge_overlay( from => $txn_backup, to => $self->_root, files => $files );
@@ -230,7 +230,7 @@ sub recover {
 	}
 }
 
-sub get_file_list {
+sub _get_file_list {
 	my ( $self, $from ) = @_;
 
 	my $files = Set::Object->new;
