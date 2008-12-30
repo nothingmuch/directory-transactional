@@ -440,13 +440,13 @@ sub lock_path_write {
 sub _txn_for_path {
 	my ( $self, $path ) = @_;
 
-	my $txn = $self->_txn;
-
-	do {
-		if ( $txn->is_changed($path) ) {
-			return $txn;
-		};
-	} while ( $txn->can("parent") and $txn = $txn->parent );
+	if ( my $txn = $self->_txn ) {
+		do {
+			if ( $txn->is_changed($path) ) {
+				return $txn;
+			};
+		} while ( $txn->can("parent") and $txn = $txn->parent );
+	}
 
 	return;
 }
