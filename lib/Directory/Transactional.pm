@@ -787,6 +787,8 @@ issues with locking, but try not to reuse paths and always reask for them to
 ensure that the right "real" path is returned even if the transaction stack has
 changed, or anything else.
 
+=back
+
 =head1 ACID GUARANTEES
 
 ACID stands for atomicity, consistency, isolation and durability.
@@ -879,7 +881,9 @@ the fine grained locking).
 
 This flag is automatically set if C<nfs> is set.
 
-=item METHODS
+=back
+
+=head1 METHODS
 
 =head2 Transaction Management
 
