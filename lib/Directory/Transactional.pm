@@ -17,6 +17,7 @@ use IO::Dir;
 
 use Directory::Transactional::TXN::Root;
 use Directory::Transactional::TXN::Nested;
+#use Directory::Transactional::Stream; # we require it later, it wants real Moose
 
 use namespace::clean -except => 'meta';
 
@@ -510,6 +511,26 @@ sub exists {
 	return -e $self->_locate_file_in_overlays($path);
 }
 
+sub is_dir {
+	my ( $self, $path ) = @_;
+
+	# FIXME this is an ugly kludge, we really need to keep better track of
+	# why/when directories are created, make note of them in 'is_changed', etc.
+
+	my @dirs = ( (map { $_->work } $self->_txn_stack), $self->root );
+
+	foreach my $dir ( @dirs ) {
+		return 1 if -d File::Spec->catdir($dir, $path);
+	}
+
+	return;
+}
+
+sub is_file {
+	my ( $self, $path ) = @_;
+	return -f $self->_locate_file_in_overlays($path);
+}
+
 sub unlink {
 	my ( $self, $path ) = @_;
 
@@ -711,6 +732,17 @@ sub _work_path {
 	make_path( File::Spec->catdir($self->_txn->work, $dir ) ) if $dir; # FIXME only if it exists in the original?
 
 	return $file;
+}
+
+sub file_stream {
+	my ( $self, @args ) = @_;
+
+	require Directory::Transactional::Stream;
+
+	Directory::Transactional::Stream->new(
+		manager => $self,
+		@args,
+	);
 }
 
 __PACKAGE__->meta->make_immutable;
