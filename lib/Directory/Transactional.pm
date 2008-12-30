@@ -468,7 +468,11 @@ sub _locate_dirs_in_overlays {
 
 	my @dirs = ( (map { $_->work } $self->_txn_stack), $self->root );
 
-	grep { -d $_ } map { File::Spec->catdir($_, $path) } @dirs;
+	if ( defined $path ) {
+		return grep { -d $_ } map { File::Spec->catdir($_, $path) } @dirs;
+	} else {
+		return @dirs;
+	}
 }
 
 sub _locate_file_in_overlays {
