@@ -592,6 +592,16 @@ sub opena {
 	return $fh;
 }
 
+sub open {
+	my ( $self, $mode, $file ) = @_;
+
+	$self->vivify_path($file);
+
+	open my $fh, $mode, $self->_work_path($file) or die "open($mode, $file): $!";
+
+	return $fh;
+}
+
 sub _readdir_from_overlay {
 	my ( $self, $path ) = @_;
 
