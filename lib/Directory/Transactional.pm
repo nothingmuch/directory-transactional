@@ -576,9 +576,20 @@ sub opena {
 sub symlink {
 	my ( $self, $to, $from ) = @_;
 
-	$self->vivify_path($to);
+	my $txn_from = $self->_work_path($from);
 
-	CORE::symlink( $to, $self->_work_path($from) ) or die $!;
+	# what a clusterfuck...
+	# produce the rel to root path of $to
+	my $abs = File::Spec->catfile( $self->_root, $from );
+	my ( undef, $dir ) = File::Spec->splitpath($abs);
+	my @dir = File::Spec->splitdir($dir);
+	pop @dir if not length $dir[-1];
+	my $to_abs = File::Spec->catfile(@dir, $to);
+	my $txn_to = File::Spec->abs2rel( $to_abs, $self->_root );
+
+	$self->vivify_path($txn_to);
+
+	CORE::symlink( $to, $txn_from ) or die $!;
 }
 
 sub _readdir_from_overlay {
@@ -674,7 +685,7 @@ sub vivify_path {
 
 		if ( -l $src ) {
 			$self->vivify_path( my $link = readlink($src) );
-			CORE::symlink( $txn_path, $link );
+			CORE::symlink( $link, $txn_path ) or die $!;
 		} else {
 			copy( $src, $txn_path ) or die $!;
 		}
