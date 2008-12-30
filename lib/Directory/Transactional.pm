@@ -411,13 +411,13 @@ sub lock_path_write {
 
 	return if $self->global_lock;
 
+	my $txn = $self->_txn or croak("Can't lock file for writing without an active transaction");
+
 	# lock the ancestor directories for reading
 	unless ( $skip_parent ) {
 		my ( undef, $dir ) = File::Spec->splitpath($path);
 		$self->lock_path_read($dir) if $dir;
-}
-
-	my $txn = $self->_txn;
+	}
 
 	if ( my $lock = $txn->get_lock($path) ) {
 		# simplest scenario, we already have a lock in this transaction
