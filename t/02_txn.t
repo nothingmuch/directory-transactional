@@ -30,15 +30,9 @@ my $work;
 	{
 		$d->txn_begin;
 
-		my $path = $d->work_path($name);
-
-		ok( -d $work, "work dir created" );
-
 		ok( not(-e $file), "root file does not exist after starting txn" );
 
-		open my $fh, ">", $path;
-		$fh->print("dancing\n");
-		close $fh;
+		$d->openw($name)->print("dancing\n");
 
 		ok( not(-e $file), "root file does not exist after writing" );
 
@@ -61,11 +55,7 @@ my $work;
 		{
 			$d->txn_begin;
 
-			my $path = $d->work_path($name);
-
-			open my $fh, ">", $path;
-			$fh->print("hippies\n");
-			close $fh;
+			$d->openw($name)->print("hippies\n");
 
 			ok( not( -e $outer_path ), "txn not yet modified" );
 
@@ -88,13 +78,9 @@ my $work;
 
 		my $path = $d->work_path($name);
 
-		ok( -d $work, "work dir created" );
-
 		is( $file->slurp, "hippies\n", "root file unmodified" );
 
-		open my $fh, ">", $path;
-		$fh->print("hairy\n");
-		close $fh;
+		$d->openw($name)->print("hairy\n");
 
 		is( $file->slurp, "hippies\n", "root file unmodified" );
 

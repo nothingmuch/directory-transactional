@@ -519,6 +519,41 @@ sub rename {
 	) or die $!;
 }
 
+sub openr {
+	my ( $self, $file ) = @_;
+
+	open my $fh, "<", $self->_locate_path_in_overlays($file) or die $!;
+
+	return $fh;
+}
+
+sub openw {
+	my ( $self, $file ) = @_;
+
+	open my $fh, ">", $self->work_path($file) or die $!;
+
+	return $fh;
+}
+
+sub opena {
+	my ( $self, $file ) = @_;
+
+	$self->vivify_path($file);
+
+	open my $fh, ">>", $self->work_path($file) or die $!;
+
+	return $fh;
+}
+
+sub symlink {
+	my ( $self, $to, $from ) = @_;
+
+	$self->vivify_path($to);
+
+	CORE::symlink( $to, $self->work_path($from) ) or die $!;
+}
+
+
 sub vivify_path {
 	my ( $self, $path ) = @_;
 
