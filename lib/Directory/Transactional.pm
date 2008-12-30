@@ -693,6 +693,14 @@ sub vivify_path {
 
 		my $src = $self->_locate_file_in_overlays($path);
 
+		if ( -l $src ) {
+			croak "The file $src is a symbolic link.";
+		}
+
+		if ( File::stat::stat($src)->nlink > 1 ) {
+			croak "the file $src has a link count of more than one.";
+		}
+
 		copy( $src, $txn_path ) or die "copy($src, $txn_path): $!";
 	}
 
