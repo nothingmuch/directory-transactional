@@ -513,7 +513,7 @@ sub unlink {
 	my ( undef, $dir ) = File::Spec->splitpath($path);
 	$self->lock_path_write($dir) if $dir;
 
-	my $txn_file = $self->work_path($path);
+	my $txn_file = $self->_work_path($path);
 
 	if ( -e $txn_file ) {
 		CORE::unlink $txn_file or die $!;
@@ -534,8 +534,8 @@ sub rename {
 	$self->vivify_path($from),
 
 	CORE::rename (
-		$self->work_path($from),
-		$self->work_path($to),
+		$self->_work_path($from),
+		$self->_work_path($to),
 	) or die $!;
 }
 
@@ -558,7 +558,7 @@ sub openr {
 sub openw {
 	my ( $self, $file ) = @_;
 
-	open my $fh, ">", $self->work_path($file) or die $!;
+	open my $fh, ">", $self->_work_path($file) or die $!;
 
 	return $fh;
 }
@@ -568,7 +568,7 @@ sub opena {
 
 	$self->vivify_path($file);
 
-	open my $fh, ">>", $self->work_path($file) or die $!;
+	open my $fh, ">>", $self->_work_path($file) or die $!;
 
 	return $fh;
 }
@@ -578,7 +578,7 @@ sub symlink {
 
 	$self->vivify_path($to);
 
-	CORE::symlink( $to, $self->work_path($from) ) or die $!;
+	CORE::symlink( $to, $self->_work_path($from) ) or die $!;
 }
 
 sub _readdir_from_overlay {
@@ -683,7 +683,7 @@ sub vivify_path {
 	return $txn_path;
 }
 
-sub work_path {
+sub _work_path {
 	my ( $self, $path ) = @_;
 
 	$self->lock_path_write($path);

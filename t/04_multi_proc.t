@@ -81,7 +81,7 @@ foreach my $forks ( 0 .. FORKS ) {
 				{
 					$d->txn_begin;
 
-					my $path = $d->work_path("bloo/blah/counter.txt");
+					my $path = $d->_work_path("bloo/blah/counter.txt");
 
 					my $count = $s->read("bloo/blah/counter.txt");
 
@@ -95,7 +95,7 @@ foreach my $forks ( 0 .. FORKS ) {
 				{
 					$d->txn_begin;
 
-					my $path = $d->work_path( my $blort = catfile("flarb", "blort_" . int(rand 10) . ".txt") );
+					my $path = $d->_work_path( my $blort = catfile("flarb", "blort_" . int(rand 10) . ".txt") );
 
 					my $count = $s->exists($blort) ? $s->read($blort) : 0;
 

@@ -52,7 +52,7 @@ my $work;
 	{
 		$d->txn_begin;
 
-		my $outer_path = $d->work_path($name);
+		my $outer_path = $d->_work_path($name);
 
 		ok( not( -e $outer_path ), "txn not yet modified" );
 
@@ -82,7 +82,7 @@ my $work;
 	{
 		$d->txn_begin;
 
-		my $path = $d->work_path($name);
+		my $path = $d->_work_path($name);
 
 		is( $file->slurp, "hippies\n", "root file unmodified" );
 
@@ -183,7 +183,7 @@ my $work;
 
 			ok( !$d->is_deleted("oi_vey.txt"), "renamed not deleted" );
 
-			ok( -e $d->work_path("oi_vey.txt"), "target exists in the txn dir" );
+			ok( -e $d->_work_path("oi_vey.txt"), "target exists in the txn dir" );
 
 			my $stat = $d->stat("oi_vey.txt");
 			is( $stat->nlink, 1, "file has one link (stat)" );
