@@ -73,6 +73,8 @@ use ok 'Directory::Transactional';
 		is( $s->read('root/bar.txt'),        "the bar",   "bar.txt not touched" );
 		is( $s->read('root/blah/gorch.txt'), "the gorch", "gorch.txt restored" );
 
+		is_deeply( [ sort $d->readdir("/") ], [ ".", "..", "bar.txt", "blah", "foo.txt" ], "file listing" );
+
 		ok( !$s->exists('work/backups/123/foo.txt'), "foo.txt backup file removed" );
 		ok( !$s->exists('work/backups/abc/blah/gorch.txt'), "gorch.txt backup file removed" );
 		ok( !$s->exists('work/txns/5421/bar.txt'), "bar.txt tempfile removed" );

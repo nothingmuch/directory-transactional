@@ -32,7 +32,13 @@ my $work;
 
 		ok( not(-e $file), "root file does not exist after starting txn" );
 
+		is_deeply( [ $d->list("foo") ], [ ], "file listing" );
+		is_deeply( [ $d->list("/") ],   [ ], "file listing" );
+
 		$d->openw($name)->print("dancing\n");
+
+		is_deeply( [ $d->list("foo") ], [ "foo/foo.txt" ], "file listing" );
+		is_deeply( [ $d->list("/") ],   [ "foo" ], "file listing" );
 
 		ok( not(-e $file), "root file does not exist after writing" );
 
@@ -98,9 +104,13 @@ my $work;
 
 		ok( !$d->is_deleted($name), "not marked as deleted" );
 
+		is_deeply( [ $d->list("foo") ], [ "foo/foo.txt" ], "file " );
+
 		$d->unlink($name);
 
 		ok( $d->is_deleted($name), "marked as deleted" );
+
+		is_deeply( [ $d->list("foo") ], [ ], "file listing" );
 
 		ok( -e $file, "file still exists" );
 		is( $file->slurp, "hippies\n", "unmodified" );
@@ -163,7 +173,13 @@ my $work;
 			ok( !$d->is_deleted($name), "not marked as deleted" );
 			ok( $d->is_deleted("oi_vey.txt"), "target file is considered deleted" );
 
+			is_deeply( [ $d->list("foo") ], [ "foo/foo.txt" ], "file listing" );
+			is_deeply( [ $d->list("/") ],   [ "foo" ], "file listing" );
+
 			$d->rename($name, "oi_vey.txt");
+
+			is_deeply( [ $d->list("foo") ], [ ], "file listing" );
+			is_deeply( [ $d->list("/") ],   [ "foo", "oi_vey.txt" ], "file listing" );
 
 			ok( !$d->is_deleted("oi_vey.txt"), "renamed not deleted" );
 

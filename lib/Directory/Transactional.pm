@@ -437,12 +437,24 @@ sub lock_path_write {
 	}
 }
 
+sub _txn_stack {
+	my $self = shift;
+
+	if ( my $txn = $self->_txn ) {
+		my @ret = $txn;
+		push @ret, $txn = $txn->parent while $txn->can("parent");
+		return @ret;
+	}
+
+	return;
+}
+
 sub _txn_for_path {
 	my ( $self, $path ) = @_;
 
 	if ( my $txn = $self->_txn ) {
 		do {
-			if ( $txn->is_changed($path) ) {
+			if ( $txn->is_changed_in_head($path) ) {
 				return $txn;
 			};
 		} while ( $txn->can("parent") and $txn = $txn->parent );
@@ -451,7 +463,15 @@ sub _txn_for_path {
 	return;
 }
 
-sub _locate_path_in_overlays {
+sub _locate_dirs_in_overlays {
+	my ( $self, $path ) = @_;
+
+	my @dirs = ( (map { $_->work } $self->_txn_stack), $self->root );
+
+	grep { -d $_ } map { File::Spec->catdir($_, $path) } @dirs;
+}
+
+sub _locate_file_in_overlays {
 	my ( $self, $path ) = @_;
 
 	if ( my $txn = $self->_txn_for_path($path) ) {
@@ -465,14 +485,14 @@ sub _locate_path_in_overlays {
 sub old_stat {
 	my ( $self, $path ) = @_;
 
-	CORE::stat($self->_locate_path_in_overlays($path));
+	CORE::stat($self->_locate_file_in_overlays($path));
 }
 
 sub stat {
 	my ( $self, $path ) = @_;
 
 	require File::stat;
-	File::stat::stat($self->_locate_path_in_overlays($path));
+	File::stat::stat($self->_locate_file_in_overlays($path));
 }
 
 sub is_deleted {
@@ -483,7 +503,7 @@ sub is_deleted {
 
 sub exists {
 	my ( $self, $path ) = @_;
-	return -e $self->_locate_path_in_overlays($path);
+	return -e $self->_locate_file_in_overlays($path);
 }
 
 sub unlink {
@@ -522,7 +542,15 @@ sub rename {
 sub openr {
 	my ( $self, $file ) = @_;
 
-	open my $fh, "<", $self->_locate_path_in_overlays($file) or die $!;
+	my $src = $self->_locate_file_in_overlays($file);
+
+	# walk symlink manually in order to propagate locks
+	while ( -l $src ) {
+		my $link = readlink($src);
+		$src = $self->_locate_dirs_in_overlays($link);
+	}
+
+	open my $fh, "<", $src, or die $!;
 
 	return $fh;
 }
@@ -553,6 +581,85 @@ sub symlink {
 	CORE::symlink( $to, $self->work_path($from) ) or die $!;
 }
 
+sub _readdir_from_overlay {
+	my ( $self, $path ) = @_;
+
+	my @dirs = $self->_locate_dirs_in_overlays($path);
+
+	my $files = Set::Object->new;
+
+	# compute union of all directories
+	foreach my $dir ( @dirs ) {
+		$files->insert( IO::Dir->new($dir)->read );
+	}
+
+	unless ( defined $path ) {
+		$files->remove(".txn_work_dir");
+		$files->remove(".txn_work_dir.lock");
+	}
+
+	return $files;
+}
+
+sub readdir {
+	my ( $self, $path ) = @_;
+
+	undef $path if $path eq "/" or !length($path);
+
+	my $files = $self->_readdir_from_overlay($path);
+
+	my @txns = $self->_txn_stack;
+
+	# remove deleted files
+	file: foreach my $file ( $files->members ) {
+		next if $file eq '.' or $file eq '..';
+
+		my $file_path = $path ? File::Spec->catfile($path, $file) : $file;
+
+		foreach my $txn ( @txns ) {
+			if ( $txn->is_changed_in_head($file_path) ) {
+				if ( not( -e File::Spec->catfile( $txn->work, $file_path ) ) ) {
+					$files->remove($file);
+				}
+				next file;
+			}
+		}
+	}
+
+	return $files->members;
+}
+
+sub list {
+	my ( $self, $path ) = @_;
+
+	undef $path if $path eq "/" or !length($path);
+
+	my $files = $self->_readdir_from_overlay($path);
+
+	$files->remove('.', '..');
+
+	my @txns = $self->_txn_stack;
+
+	my @ret;
+
+	# remove deleted files
+	file: foreach my $file ( $files->members ) {
+		my $file_path = $path ? File::Spec->catfile($path, $file) : $file;
+
+		foreach my $txn ( @txns ) {
+			if ( $txn->is_changed_in_head($file_path) ) {
+				if ( -e File::Spec->catfile( $txn->work, $file_path ) ) {
+					push @ret, $file_path;
+				}
+				next file;
+			}
+		}
+
+		push @ret, $file_path;
+	}
+
+	return sort @ret;
+}
 
 sub vivify_path {
 	my ( $self, $path ) = @_;
@@ -563,7 +670,14 @@ sub vivify_path {
 		my ( undef, $dir ) = File::Spec->splitpath($path);
 		make_path( File::Spec->catdir($self->_txn->work, $dir ) ) if $dir; # FIXME only if it exists in the original?
 
-		copy( $self->_locate_path_in_overlays($path), $txn_path ) or die $!;
+		my $src = $self->_locate_file_in_overlays($path);
+
+		if ( -l $src ) {
+			$self->vivify_path( my $link = readlink($src) );
+			CORE::symlink( $txn_path, $link );
+		} else {
+			copy( $src, $txn_path ) or die $!;
+		}
 	}
 
 	return $txn_path;

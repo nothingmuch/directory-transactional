@@ -37,6 +37,22 @@ sub find_lock {
 	}
 }
 
+has [qw(parent_changed all_changed)] => (
+	isa => "Set::Object",
+	is  => "ro",
+	lazy_build => 1,
+);
+
+sub _build_parent_changed {
+	shift->parent->all_changed;
+}
+
+sub _build_all_changed {
+	my $self = shift;
+
+	$self->changed->union( $self->parent_changed );
+}
+
 __PACKAGE__->meta->make_immutable;
 
 __PACKAGE__

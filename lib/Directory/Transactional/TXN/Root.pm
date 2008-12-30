@@ -34,6 +34,12 @@ sub find_lock {
 	$self->get_lock($path);
 }
 
+sub clear_all_changed {}
+
+sub all_changed {
+	shift->changed;
+}
+
 __PACKAGE__->meta->make_immutable;
 
 __PACKAGE__

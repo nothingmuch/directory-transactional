@@ -82,10 +82,14 @@ sub get_lock {
 	$self->_locks->{$path};
 }
 
-sub is_changed {
+sub is_changed_in_head {
 	my ( $self, $path ) = @_;
 
 	$self->changed->includes($path);
+}
+
+sub is_changed {
+	my $self = shift;
 }
 
 sub DEMOLISH {
@@ -102,6 +106,7 @@ sub DEMOLISH {
 
 sub mark_changed {
 	my ( $self, @args ) = @_;
+	$self->clear_all_changed;
 	$self->changed->insert(@args);
 }
 
