@@ -145,12 +145,15 @@ Directory::Transactional::Stream - Traverse files in L<Directory::Transactional>
 =head1 DESCRIPTION
 
 This stream produces depth or breadth first traversal order recursion through
-L<Path::Class::Dir> objects.
-
-Items are read iteratively, and a stack of open directory handles is used to
-keep track of state.
+a L<Directory::Transactional> object, providing a view of the head transaction.
 
 =head1 ATTRIBUTES
+
+=over 4
+
+=item dir
+
+The directory to list. Defaults to C<""> (the root directory).
 
 =item chunk_size
 
@@ -164,6 +167,8 @@ Chooses between depth first and breadth first traversal order.
 
 If true only L<Path::Class::File> items will be returned in the output streams
 (no directories).
+
+=back
 
 =head1 METHODS
 

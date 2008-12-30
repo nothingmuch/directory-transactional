@@ -949,6 +949,107 @@ Note that these methods are no-ops if C<global_lock> is set.
 
 =back
 
+=head2 File Access
+
+=over 4
+
+=item openr $path
+
+=item openw $path
+
+=item opena $path
+
+=item open $mode, $path
+
+Open a file for reading, writing (clobbers) or appending, or with a custom mode
+for three arg open.
+
+Using C<openw> or C<openr> is reccomended if that's all you need, because it
+will not copy the file into the transaction work dir first.
+
+=item stat $path
+
+Runs L<File::stat/stat> on the physical path.
+
+=item old_stat $path
+
+Runs C<CORE::stat> on the physical path.
+
+=item exists $path
+
+=item is_deleted $path
+
+Whether a file exists or has been deleted in the current transaction.
+
+=item is_file $path
+
+Runs the C<-f> file test on the right physical path.
+
+=item is_dir $path
+
+Runs the C<-d> file test on the right physical path.
+
+=item unlink $path
+
+Deletes the file in the current transaction
+
+=item rename $from, $to
+
+Renames the file in the current transaction.
+
+Note that while this is a real C<rename> call in the txn work dir that is done
+on a copy, when comitting to the top level directory the original will be
+unlinked and the new file from the txn work dir will be renamed to the original.
+
+Hard links will B<NOT> be retained.
+
+=item readdir $path
+
+Merges the overlays of all the transactions and returns unsorted basenames.
+
+A path of C<""> can be used to list the root directory.
+
+=item list $path
+
+A DWIM version of C<readdir> that returns paths relative to C<root>, filters
+out C<.> and C<..> and sorts the output.
+
+A path of C<""> can be used to list the root directory.
+
+=item file_stream %args
+
+Creates a L<Directory::Transactional::Stream> for a recursive file listing.
+
+The C<dir> option can be used to specify a directory, defaulting to C<root>.
+
+=back
+
+=head2 Internal Methods
+
+These are documented so that they may provide insight into the inner workings
+of the module, but should not be considered part of the API.
+
+=over 4
+
+=item merge_overlay
+
+Merges one directory over another.
+
+=item recover
+
+Runs the directory state recovery code.
+
+See L</"TRANSACTIONAL PROTOCOL">
+
+=item vivify_path $path
+
+Copies C<$path> as necessary from a parent transaction or the root directory in
+order to facilitate local work.
+
+Does not support hard or symbolic links (yet).
+
+=back
+
 =cut
 
 
