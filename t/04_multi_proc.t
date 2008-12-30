@@ -21,13 +21,11 @@ use Test::TempDir qw(scratch);
 
 use ok 'Directory::Transactional';
 
-{
+if ( eval { require Hook::LexWrap } ) {
 	package Directory::Transactional;
 
-	use Hook::LexWrap;
-
-	# inflate the exclusive lock time
-	wrap recover => pre => sub { select(undef,undef,undef,0.05 * rand) };
+	# inflate the exclusive lock time to increase lock contention
+	Hook::LexWrap::wrap( recover => pre => sub { select(undef,undef,undef,0.1 * rand) } );
 }
 
 foreach my $forks ( 0 .. FORKS ) {
