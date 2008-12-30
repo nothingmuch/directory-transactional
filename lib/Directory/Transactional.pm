@@ -91,8 +91,8 @@ sub _get_flock {
 	open my $fh, "+>", $file or die $!;
 
 	if ( flock($fh, $mode) ) {
-		bless $fh, $mode & LOCK_EX ? "Directory::Transactional::Lock::Exclusive" : "Directory::Transactional::Lock::Shared";
-		return $fh;
+		my $class = ($mode & LOCK_EX) ? "Directory::Transactional::Lock::Exclusive" : "Directory::Transactional::Lock::Shared";
+		return bless $fh, $class;
 	} elsif ( not $!{EWOULDBLOCK} ) {
 		# die on any error except failing to obtain a nonblocking lock
 		die $!;
@@ -110,7 +110,7 @@ sub _get_flock {
 	package Directory::Transactional::Lock::Exclusive;
 	use Fcntl qw(LOCK_SH);
 
-	our @ISA = qw(Directory::Transactional::Lock);
+	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
 	sub is_shared { 0 }
 	sub upgrade { }
@@ -119,7 +119,7 @@ sub _get_flock {
 	package Directory::Transactional::Lock::Shared;
 	use Fcntl qw(LOCK_EX);
 
-	our @ISA = qw(Directory::Transactional::Lock);
+	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
 	sub is_shared { 1 }
 	sub upgrade { flock($_[0], LOCK_EX) or die $! }
