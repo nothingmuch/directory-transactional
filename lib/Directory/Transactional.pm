@@ -569,13 +569,7 @@ sub openr {
 
 	my $src = $self->_locate_file_in_overlays($file);
 
-	# walk symlink manually in order to propagate locks
-	while ( -l $src ) {
-		my $link = readlink($src);
-		$src = $self->_locate_dirs_in_overlays($link);
-	}
-
-	open my $fh, "<", $src, or die $!;
+	open my $fh, "<", $src, or die "openr($file): $!";
 
 	return $fh;
 }
@@ -583,7 +577,7 @@ sub openr {
 sub openw {
 	my ( $self, $file ) = @_;
 
-	open my $fh, ">", $self->_work_path($file) or die $!;
+	open my $fh, ">", $self->_work_path($file) or die "openw($file): $!";
 
 	return $fh;
 }
@@ -593,28 +587,9 @@ sub opena {
 
 	$self->vivify_path($file);
 
-	open my $fh, ">>", $self->_work_path($file) or die $!;
+	open my $fh, ">>", $self->_work_path($file) or die "opena($file): $!";
 
 	return $fh;
-}
-
-sub symlink {
-	my ( $self, $to, $from ) = @_;
-
-	my $txn_from = $self->_work_path($from);
-
-	# what a clusterfuck...
-	# produce the rel to root path of $to
-	my $abs = File::Spec->catfile( $self->_root, $from );
-	my ( undef, $dir ) = File::Spec->splitpath($abs);
-	my @dir = File::Spec->splitdir($dir);
-	pop @dir if not length $dir[-1];
-	my $to_abs = File::Spec->catfile(@dir, $to);
-	my $txn_to = File::Spec->abs2rel( $to_abs, $self->_root );
-
-	$self->vivify_path($txn_to);
-
-	CORE::symlink( $to, $txn_from ) or die $!;
 }
 
 sub _readdir_from_overlay {
@@ -708,12 +683,7 @@ sub vivify_path {
 
 		my $src = $self->_locate_file_in_overlays($path);
 
-		if ( -l $src ) {
-			$self->vivify_path( my $link = readlink($src) );
-			CORE::symlink( $link, $txn_path ) or die $!;
-		} else {
-			copy( $src, $txn_path ) or die $!;
-		}
+		copy( $src, $txn_path ) or die "copy($src, $txn_path): $!";
 	}
 
 	return $txn_path;
