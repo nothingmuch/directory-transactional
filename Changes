@@ -1,0 +1,7 @@
+0.02
+	- Add missing dep
+	- Doc fixes
+	- add missing txn_do method
+
+0.01
+	- Initial release
