@@ -76,35 +76,46 @@ foreach my $forks ( 0 .. FORKS ) {
 				);
 				alarm 0;
 
-				{
-					$d->txn_begin;
+				$d->txn_do(sub {
+					# need to lock it exclusively if we're going to read a value and then use that for writing,
+					# otherwise the counter may be read twice by two readers,
+					# at which point both will try to get a lock, write the
+					# value + 1, and then commit. the counter will be smaller by 1 than what it should be
+					$d->lock_path_write("bloo/blah/counter.txt");
 
-					my $path = $d->_work_path("bloo/blah/counter.txt");
+					my $count = readline $d->openr("bloo/blah/counter.txt");
 
-					my $count = $s->read("bloo/blah/counter.txt");
+					$d->openw("bloo/blah/counter.txt")->print( $count + 1, "\n" );
+				});
 
-					open my $fh, ">", $path or die $!;
-					$fh->print( $count + 1, "\n" );
-					close $fh or die $!;
+				$d->txn_do( body => sub {
+					my $blort = catfile("flarb", "blort_" . int(rand 8) . ".txt");
 
-					$d->txn_commit;
-				}
+					# this example is simpler
+					# $d->exists locks the directory for reading, so nobody can modify it
+					# this means that nobody can create it unless they get an exclusive lock on the directory
 
-				{
-					$d->txn_begin;
+					if ( $d->exists($blort) ) {
+						# if it exists, get a write lock on the file by opening it for reading and writing
+						my $fh = $d->open('+<', $blort);
 
-					my $path = $d->_work_path( my $blort = catfile("flarb", "blort_" . int(rand 10) . ".txt") );
+						my $count = <$fh>;
 
-					my $count = $s->exists($blort) ? $s->read($blort) : 0;
+						select(undef,undef,undef,0.02); # increaase lock contention
 
-					select(undef,undef,undef,0.01);
+						seek($fh,0,0);
+						truncate($fh,0);
 
-					open my $fh, ">", $path;
-					$fh->print( $count + 1, "\n" );
-					close $fh;
+						$fh->print( $count + 1, "\n" );
+					} else {
+						# otherwise create it
+						my $fh = $d->openw($blort);
 
-					$d->txn_commit;
-				}
+						select(undef,undef,undef,0.02); # increase lock contention
+
+						$fh->print(1, "\n");
+					}
+				});
 			}
 
 			while( wait	!= -1 ) { $exit = 1 if $? }

@@ -113,6 +113,7 @@ sub _get_flock {
 	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
 	sub is_shared { 0 }
+	sub is_exclusive { 1 }
 	sub upgrade { }
 	sub downgrade {
 		my $self = shift;
@@ -126,6 +127,7 @@ sub _get_flock {
 	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
 	sub is_shared { 1 }
+	sub is_exclusive { 0 }
 	sub upgrade {
 		my $self = shift;
 		flock($self, LOCK_EX) or die $!;
@@ -442,56 +444,32 @@ sub txn_rollback {
 	return;
 }
 
-# lock a path for reading
-sub lock_path_read {
-	my ( $self, $path, $skip_parent ) = @_;
+sub _lock_path_read {
+	my ( $self, $path ) = @_;
 
-	return if $self->global_lock;
+	my $txn = $self->_txn;
 
-	my $txn = $self->_txn or return;
-
-	# create a list of ancestor directories
-	my @paths;
-
-	unless ( $skip_parent ) {
-		my @dirs = File::Spec->splitdir($path);
-		pop @dirs;
-
-		if ( @dirs ) {
-			for ( my $next = shift @dirs; @dirs; $next = File::Spec->catdir($next, shift @dirs) ) {
-				push @paths, $next;
-			}
-		}
-	}
-
-	foreach my $path ( @paths, $path ) {
-		# any type of lock in this or any parent transaction is going to be good enough
-		unless ( $txn->find_lock($path) ) {
-			$txn->set_lock( $path, $self->_get_flock( File::Spec->catfile( $self->_locks, $path . ".lock" ), LOCK_SH) );
-		}
+	if ( my $lock = $txn->find_lock($path) ) {
+		return $lock;
+	} else {
+		my $lock = $self->_get_flock( File::Spec->catfile( $self->_locks, $path . ".lock" ), LOCK_SH);
+		$txn->set_lock( $path, $lock );
 	}
 }
 
-sub lock_path_write {
-	my ( $self, $path, $skip_parent ) = @_;
+sub _lock_path_write {
+	my ( $self, $path ) = @_;
 
-	return if $self->global_lock;
-
-	my $txn = $self->_txn or croak("Can't lock file for writing without an active transaction");
-
-	# lock the ancestor directories for reading
-	unless ( $skip_parent ) {
-		my ( undef, $dir ) = File::Spec->splitpath($path);
-		$self->lock_path_read($dir) if $dir;
-	}
+	my $txn = $self->_txn;
 
 	if ( my $lock = $txn->get_lock($path) ) {
-		# simplest scenario, we already have a lock in this transaction
-		$lock->upgrade; # upgrade it if necessary
-
+		unless ( $lock->is_exclusive ) {
+			# simplest scenario, we already have a lock in this transaction
+			$lock->upgrade; # upgrade it if necessary
+		}
 	} elsif ( my $inherited_lock = $txn->find_lock($path) ) {
 		# a parent transaction has a lock
-		if ( $inherited_lock->is_shared ) {
+		unless ( $inherited_lock->is_exclusive ) {
 			# upgrade it, and mark for downgrade on rollback
 			$inherited_lock->upgrade;
 			push @{ $txn->downgrade }, $inherited_lock;
@@ -499,8 +477,67 @@ sub lock_path_write {
 		$txn->set_lock( $path, $inherited_lock );
 	} else {
 		# otherwise create a new lock
-		$txn->set_lock( $path, $self->_get_flock( File::Spec->catfile( $self->_locks, $path . ".lock" ), LOCK_EX) );
+		my $lock = $self->_get_flock( File::Spec->catfile( $self->_locks, $path . ".lock" ), LOCK_EX);
+		$txn->set_lock( $path, $lock );
 	}
+}
+
+sub _lock_parent {
+	my ( $self, $path ) = @_;
+
+	my ( undef, $dir ) = File::Spec->splitpath($path);
+
+	my @dirs = File::Spec->splitdir($dir);
+
+	{
+		no warnings 'uninitialized';
+		pop @dirs unless length $dirs[-1]; # trailing slash
+	}
+	pop @dirs if $dir eq $path;
+
+	my $parent = "";
+
+	do {
+		$self->_lock_path_read($parent);
+	} while (
+		@dirs
+			and
+		$parent = length($parent)
+			? File::Spec->catdir($parent, shift @dirs)
+			: shift @dirs
+	);
+
+	return;
+}
+
+# lock a path for reading
+sub lock_path_read {
+	my ( $self, $path ) = @_;
+
+	my $txn = $self->_txn or croak("Can't lock file for writing without an active transaction");
+
+	return if $self->global_lock;
+
+	$self->_lock_parent($path);
+
+	$self->_lock_path_read($path);
+
+	return;
+}
+
+sub lock_path_write {
+	my ( $self, $path ) = @_;
+
+	my $txn = $self->_txn or croak("Can't lock file for writing without an active transaction");
+
+	return if $self->global_lock;
+
+	# lock the ancestor directories for reading
+	$self->_lock_parent($path);
+
+	$self->_lock_path_write($path);
+
+	return;
 }
 
 sub _txn_stack {
@@ -601,7 +638,7 @@ sub unlink {
 
 	# lock parent for writing
 	my ( undef, $dir ) = File::Spec->splitpath($path);
-	$self->lock_path_write($dir) if $dir;
+	$self->lock_path_write($dir);
 
 	my $txn_file = $self->_work_path($path);
 
@@ -618,7 +655,7 @@ sub rename {
 	foreach my $path ( $from, $to ) {
 		# lock parents for writing
 		my ( undef, $dir ) = File::Spec->splitpath($path);
-		$self->lock_path_write($dir) if $dir;
+		$self->lock_path_write($dir);
 	}
 
 	$self->vivify_path($from),
@@ -640,9 +677,23 @@ sub openr {
 }
 
 sub openw {
-	my ( $self, $file ) = @_;
+	my ( $self, $path ) = @_;
 
-	open my $fh, ">", $self->_work_path($file) or die "openw($file): $!";
+	my $txn = $self->_txn;
+
+	my $file = File::Spec->catfile( $txn->work, $path );
+
+	unless ( $txn->is_changed_in_head($path) ) {
+		my ( undef, $dir ) = File::Spec->splitpath($path);
+
+		$self->lock_path_write($path);
+
+		make_path( File::Spec->catdir($txn->work, $dir) ) if length($dir); # FIXME only if it exists in the original?
+	}
+
+	$txn->mark_changed($path);
+
+	open my $fh, ">", $file or die "openw($path): $!";
 
 	return $fh;
 }
@@ -748,26 +799,45 @@ sub list {
 	return sort @ret;
 }
 
+sub _work_path {
+	my ( $self, $path ) = @_;
+
+	$self->lock_path_write($path);
+
+	my $txn = $self->_txn;
+
+	$txn->mark_changed($path);
+
+	my $file = File::Spec->catfile( $txn->work, $path );
+
+	my ( undef, $dir ) = File::Spec->splitpath($path);
+	make_path( File::Spec->catdir($txn->work, $dir ) ) if length($dir); # FIXME only if it exists in the original?
+
+	return $file;
+}
+
 sub vivify_path {
 	my ( $self, $path ) = @_;
 
-	my $txn_path = File::Spec->catfile( $self->_txn->work, $path );
+	my $txn = $self->_txn;
 
-	unless ( -e $txn_path ) {
-		my ( undef, $dir ) = File::Spec->splitpath($path);
-		make_path( File::Spec->catdir($self->_txn->work, $dir ) ) if $dir; # FIXME only if it exists in the original?
+	my $txn_path = File::Spec->catfile( $txn->work, $path );
+
+	unless ( $txn->is_changed_in_head($path) ) {
+		$self->lock_path_write($path);
 
 		my $src = $self->_locate_file_in_overlays($path);
 
 		if ( my $stat = File::stat::stat($src) ) {
-			if ( -l $src ) {
-				croak "The file $src is a symbolic link.";
-			}
-
 			if ( $stat->nlink > 1 ) {
 				croak "the file $src has a link count of more than one.";
 			}
 
+			if ( -l $src ) {
+				croak "The file $src is a symbolic link.";
+			}
+
+			$self->_work_path($path); # FIXME vivifies parent dir
 			copy( $src, $txn_path ) or die "copy($src, $txn_path): $!";
 		}
 	}
@@ -775,20 +845,7 @@ sub vivify_path {
 	return $txn_path;
 }
 
-sub _work_path {
-	my ( $self, $path ) = @_;
 
-	$self->lock_path_write($path);
-
-	$self->_txn->mark_changed($path);
-
-	my $file = File::Spec->catfile( $self->_txn->work, $path );
-
-	my ( undef, $dir ) = File::Spec->splitpath($path);
-	make_path( File::Spec->catdir($self->_txn->work, $dir ) ) if $dir; # FIXME only if it exists in the original?
-
-	return $file;
-}
 
 sub file_stream {
 	my ( $self, @args ) = @_;
