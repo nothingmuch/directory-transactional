@@ -678,6 +678,7 @@ sub _readdir_from_overlay {
 	unless ( defined $path ) {
 		$files->remove(".txn_work_dir");
 		$files->remove(".txn_work_dir.lock");
+		$files->remove(".txn_work_dir.lock.NFSLock") if $self->nfs;
 	}
 
 	return $files;
