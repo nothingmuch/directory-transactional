@@ -49,17 +49,14 @@ my $work;
 
 	is( $file->slurp, "dancing\n", "file contents" );
 
-	{
-		$d->txn_begin;
-
+	$d->txn_do(sub {
 		my $outer_path = $d->_work_path($name);
 
 		ok( not( -e $outer_path ), "txn not yet modified" );
 
 		is( $file->slurp, "dancing\n", "root file not yet modified" );
 
-		{
-			$d->txn_begin;
+		$d->txn_do(sub {
 
 			$d->openw($name)->print("hippies\n");
 
@@ -67,31 +64,30 @@ my $work;
 
 			is( $file->slurp, "dancing\n", "root file not yet modified" );
 
-			$d->txn_commit;
-		}
+		});
 
 		is( file($outer_path)->slurp, "hippies\n", "nested transaction comitted to parent" );
 
 		is( $file->slurp, "dancing\n", "root file not yet modified" );
-
-		$d->txn_commit;
-	}
+	});
 
 	is( $file->slurp, "hippies\n", "root file comitted" );
 
-	{
-		$d->txn_begin;
+	eval {
+		$d->txn_do(sub {
+			my $path = $d->_work_path($name);
 
-		my $path = $d->_work_path($name);
+			is( $file->slurp, "hippies\n", "root file unmodified" );
 
-		is( $file->slurp, "hippies\n", "root file unmodified" );
+			$d->openw($name)->print("hairy\n");
 
-		$d->openw($name)->print("hairy\n");
+			is( $file->slurp, "hippies\n", "root file unmodified" );
 
-		is( $file->slurp, "hippies\n", "root file unmodified" );
+			die "foo\n";
+		});
+	};
 
-		$d->txn_rollback;
-	}
+	is( $@, "foo\n", "error" );
 
 	is( $file->slurp, "hippies\n", "root file unmodified" );
 
