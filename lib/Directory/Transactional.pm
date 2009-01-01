@@ -114,7 +114,11 @@ sub _get_flock {
 
 	sub is_shared { 0 }
 	sub upgrade { }
-	sub downgrade { flock($_[0], LOCK_SH) or die $! }
+	sub downgrade {
+		my $self = shift;
+		flock($self, LOCK_SH) or die $!;
+		bless $self, "Directory::Transactional::Lock::Shared";
+	}
 
 	package Directory::Transactional::Lock::Shared;
 	use Fcntl qw(LOCK_EX);
@@ -122,7 +126,11 @@ sub _get_flock {
 	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
 	sub is_shared { 1 }
-	sub upgrade { flock($_[0], LOCK_EX) or die $! }
+	sub upgrade {
+		my $self = shift;
+		flock($self, LOCK_EX) or die $!;
+		bless($self, "Directory::Transactional::Lock::Exclusive");
+	}
 	sub downgrade { }
 }
 

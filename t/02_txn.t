@@ -75,15 +75,19 @@ my $work;
 
 	eval {
 		$d->txn_do(sub {
-			my $path = $d->_work_path($name);
+			$d->openr($name); # get a read lock, to test downgrading
 
-			is( $file->slurp, "hippies\n", "root file unmodified" );
+			$d->txn_do(sub {
+				my $path = $d->_work_path($name);
 
-			$d->openw($name)->print("hairy\n");
+				is( $file->slurp, "hippies\n", "root file unmodified" );
 
-			is( $file->slurp, "hippies\n", "root file unmodified" );
+				$d->openw($name)->print("hairy\n");
 
-			die "foo\n";
+				is( $file->slurp, "hippies\n", "root file unmodified" );
+
+				die "foo\n";
+			});
 		});
 	};
 
