@@ -805,9 +805,13 @@ journalling/recovery using C<flock> or L<File::NFSLock>
 
 	my $d = Directory::Transactional->new( root => $path );
 
-	$d->txn_begin;
+	$d->txn_do(sub {
+		my $fh = $d->openw("path/to/file");
 
-	$d->txn_commit;
+		$fh->print("I AR MODIFY");
+
+		close $fh;
+	});
 
 =head1 DESCRIPTION
 
