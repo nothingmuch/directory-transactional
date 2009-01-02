@@ -18,7 +18,7 @@ has manager => (
 has dir => (
 	isa => "Str",
 	is  => "ro",
-    default => "",	
+    default => "",
 );
 
 has depth_first => (

@@ -63,7 +63,7 @@ foreach my $depth ( 0, 1 ) {
 			"breadth first traversal path set",
 		);
 	}
-	
+
 	{
 		my $paths = $m->file_stream(
 			chunk_size => 2,
