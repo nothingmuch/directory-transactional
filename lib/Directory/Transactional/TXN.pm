@@ -117,6 +117,8 @@ sub mark_changed {
 	$self->changed->insert(@args);
 }
 
+sub auto_handle {}
+
 __PACKAGE__->meta->make_immutable;
 
 __PACKAGE__

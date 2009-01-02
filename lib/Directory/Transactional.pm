@@ -51,6 +51,12 @@ has global_lock => (
 	default => sub { shift->nfs },
 );
 
+has auto_commit => (
+	isa => "Bool",
+	is  => "ro",
+	default => 1,
+);
+
 sub _get_lock {
 	my ( $self, @args ) = @_;
 
@@ -357,12 +363,15 @@ sub txn_do {
 }
 
 sub txn_begin {
-	my $self = shift;
+	my ( $self, @args ) = @_;
 
 	my $txn;
 
 	if ( my $p = $self->_txn ) {
 		# this is a child transaction
+
+		croak "Can't txn_begin if an auto transaction is still alive" if $p->auto_handle;
+
 		$txn = Directory::Transactional::TXN::Nested->new(
 			parent  => $p,
 			manager => $self,
@@ -370,6 +379,7 @@ sub txn_begin {
 	} else {
 		# this is a top level transaction
 		$txn = Directory::Transactional::TXN::Root->new(
+			@args,
 			manager => $self,
 			( $self->global_lock ? (
 				# when global_lock is set, take an exclusive lock on the root dir
@@ -387,7 +397,7 @@ sub txn_begin {
 sub _pop_txn {
 	my $self = shift;
 
-	my $txn = $self->_txn;
+	my $txn = $self->_txn or croak "No active transaction";
 
 	if ( $txn->isa("Directory::Transactional::TXN::Nested") ) {
 		$self->_txn( $txn->parent );
@@ -446,6 +456,39 @@ sub txn_rollback {
 	}
 
 	return;
+}
+
+sub _auto_txn {
+	my $self = shift;
+
+	return if $self->_txn;
+
+	croak "Auto commit is disabled" unless $self->auto_commit;
+
+	require Scope::Guard;
+
+	$self->txn_begin;
+
+	return Scope::Guard->new(sub { $self->txn_commit });
+}
+
+sub _resource_auto_txn {
+	my $self = shift;
+
+	if ( my $txn = $self->_txn ) {
+		# return the same handle so that more resources can be registered
+		return $txn->auto_handle;
+	} else {
+		croak "Auto commit is disabled" unless $self->auto_commit;
+
+		require Directory::Transactional::AutoCommit;
+		
+		my $h = Directory::Transactional::AutoCommit->new( manager => $self );
+
+		$self->txn_begin( auto_handle => $h );
+
+		return $h;
+	}
 }
 
 sub _lock_path_read {
@@ -657,6 +700,8 @@ sub unlink {
 sub rename {
 	my ( $self, $from, $to ) = @_;
 
+	my $t = $self->_auto_txn;
+
 	foreach my $path ( $from, $to ) {
 		# lock parents for writing
 		my ( undef, $dir ) = File::Spec->splitpath($path);
@@ -674,15 +719,21 @@ sub rename {
 sub openr {
 	my ( $self, $file ) = @_;
 
+	my $t = $self->_resource_auto_txn;
+
 	my $src = $self->_locate_file_in_overlays($file);
 
 	open my $fh, "<", $src, or die "openr($file): $!";
+
+	$t->register($fh) if $t;
 
 	return $fh;
 }
 
 sub openw {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_resource_auto_txn;
 
 	my $txn = $self->_txn;
 
@@ -700,15 +751,21 @@ sub openw {
 
 	open my $fh, ">", $file or die "openw($path): $!";
 
+	$t->register($fh) if $t;
+
 	return $fh;
 }
 
 sub opena {
 	my ( $self, $file ) = @_;
 
+	my $t = $self->_resource_auto_txn;
+
 	$self->vivify_path($file);
 
 	open my $fh, ">>", $self->_work_path($file) or die "opena($file): $!";
+
+	$t->register($fh) if $t;
 
 	return $fh;
 }
@@ -716,15 +773,21 @@ sub opena {
 sub open {
 	my ( $self, $mode, $file ) = @_;
 
+	my $t = $self->_resource_auto_txn;
+
 	$self->vivify_path($file);
 
 	open my $fh, $mode, $self->_work_path($file) or die "open($mode, $file): $!";
+
+	$t->register($fh) if $t;
 
 	return $fh;
 }
 
 sub _readdir_from_overlay {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
 
 	my @dirs = $self->_locate_dirs_in_overlays($path);
 
@@ -774,6 +837,8 @@ sub readdir {
 
 sub list {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
 
 	undef $path if $path eq "/" or !length($path);
 
@@ -855,12 +920,18 @@ sub vivify_path {
 sub file_stream {
 	my ( $self, @args ) = @_;
 
+	my $t = $self->_resource_auto_txn;
+
 	require Directory::Transactional::Stream;
 
-	Directory::Transactional::Stream->new(
+	my $stream = Directory::Transactional::Stream->new(
 		manager => $self,
 		@args,
 	);
+
+	$t->register($stream) if $t;
+
+	return $stream;
 }
 
 __PACKAGE__->meta->make_immutable;
@@ -1002,11 +1073,24 @@ recovery will clean these files up normally.
 
 =head1 LIMITATIONS
 
-=head2 No Auto-Commit
+=head2 Auto-Commit
 
-In the future a transaction could be opened automatically and kept alive as
-long as any filehandles opened inside it, but currently autocommit or reading
-outside of a transaction are not supported.
+If you perform any operation outside of a transaction and C<auto_commit> is
+enabled a transaction will be created for you.
+
+For operations like C<rename> or C<readdir> which do not return resource the
+transaction is comitted immediately.
+
+Operations like C<open> or C<file_stream> on the other create a transaction
+that will be alive as long as the return value is alive.
+
+This means that you should not leak filehandles when relying on autocommit.
+
+Opening a new transaction when an automatic one is already opened is an error.
+
+Note that this resource tracking comes with an overhead, especially on Perl
+5.8, so even if you are only performing read operations it is reccomended that
+you operate within the scope of a real transaction.
 
 =head2 Open Filehandles
 
@@ -1063,6 +1147,14 @@ This is useful for avoiding deadlocks (there is no deadlock detection code in
 the fine grained locking).
 
 This flag is automatically set if C<nfs> is set.
+
+=item auto_commit
+
+If true (the default) any operation not performed within a transaction will
+cause a transaction to be automatically created and comitted.
+
+Transactions automatically created for operations which return things like
+filehandles will stay alive for as long as the returned resource does.
 
 =back
 

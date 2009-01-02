@@ -16,6 +16,11 @@ has global_lock => (
 	is  => "ro",
 );
 
+# used for auto commit
+has auto_handle => (
+	is  => "ro",
+);
+
 has backup => (
 	isa => "Str",
 	is  => "ro",
@@ -38,6 +43,15 @@ sub clear_all_changed {}
 
 sub all_changed {
 	shift->changed;
+}
+
+sub DEMOLISH {
+	my $self = shift;
+
+	if ( my $ah = $self->auto_handle ) {
+		# in case of rollback
+		$ah->finished(1);
+	}
 }
 
 __PACKAGE__->meta->make_immutable;
