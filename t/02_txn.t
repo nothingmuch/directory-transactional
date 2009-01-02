@@ -7,6 +7,7 @@ use Path::Class;
 use File::Spec::Functions;
 
 use Test::More 'no_plan';
+use Test::Exception;
 use Test::TempDir qw(tempdir);
 
 use ok 'Directory::Transactional';
@@ -88,13 +89,13 @@ foreach my $nfs ( 0, 1 ) {
 
 				$d->txn_do(sub {
 
-						$d->openw($name)->print("hippies\n");
+					$d->openw($name)->print("hippies\n");
 
-						ok( not( -e $outer_path ), "txn not yet modified" );
+					ok( not( -e $outer_path ), "txn not yet modified" );
 
-						is( $file->slurp, "dancing\n", "root file not yet modified" );
+					is( $file->slurp, "dancing\n", "root file not yet modified" );
 
-					});
+				});
 
 				is( file($outer_path)->slurp, "hippies\n", "nested transaction comitted to parent" );
 
@@ -103,25 +104,23 @@ foreach my $nfs ( 0, 1 ) {
 
 		is( $file->slurp, "hippies\n", "root file comitted" );
 
-		eval {
+		throws_ok {
 			$d->txn_do(sub {
-					$d->openr($name); # get a read lock, to test downgrading
+				$d->openr($name); # get a read lock, to test downgrading
 
-					$d->txn_do(sub {
-							my $path = $d->_work_path($name);
+				$d->txn_do(sub {
+					my $path = $d->_work_path($name);
 
-							is( $file->slurp, "hippies\n", "root file unmodified" );
+					is( $file->slurp, "hippies\n", "root file unmodified" );
 
-							$d->openw($name)->print("hairy\n");
+					$d->openw($name)->print("hairy\n");
 
-							is( $file->slurp, "hippies\n", "root file unmodified" );
+					is( $file->slurp, "hippies\n", "root file unmodified" );
 
-							die "foo\n";
-						});
+					die "foo\n";
 				});
-		};
-
-		is( $@, "foo\n", "error" );
+			});
+		} qr/^foo$/, "caught error in txn_do";
 
 		is( $file->slurp, "hippies\n", "root file unmodified" );
 
