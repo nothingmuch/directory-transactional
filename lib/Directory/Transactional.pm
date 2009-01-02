@@ -1000,6 +1000,27 @@ restoring all the renamed backup files. Moving the backup directory into the
 work directory signifies that the transaction has comitted successfully, and
 recovery will clean these files up normally.
 
+=head1 LIMITATIONS
+
+=head2 No Auto-Commit
+
+In the future a transaction could be opened automatically and kept alive as
+long as any filehandles opened inside it, but currently autocommit or reading
+outside of a transaction are not supported.
+
+=head2 Open Filehandles
+
+One filehandle is required per every lock when using fine grained locking.
+
+For large transactions it is reccomended you set C<global_lock>, which is like
+taking an exclusive lock on the root directory.
+
+C<global_lock> also performs better, but causes long wait times if multiple
+processes are accessing the same database but not the same data. For web
+applications C<global_lock> should probably be off for better concurrency.
+
+=back
+
 =head1 ATTRIBUTES
 
 =over 4
