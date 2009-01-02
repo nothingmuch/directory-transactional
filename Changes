@@ -1,3 +1,13 @@
+0.03
+	- add auto_commit
+	- refactored internals
+	- documented various limitations
+	- more error checking
+	- instances in different processes with global_lock set to different values
+	  now interact safely
+	- no longer depends on Data::UUID::LibUUID, but prefers it if it is
+	  available
+
 0.02
 	- Add missing dep
 	- Doc fixes
