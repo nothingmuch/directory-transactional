@@ -11,7 +11,7 @@ use constant FORKS => 6;
 
 BEGIN {
 	if ( File::Spec->isa("File::Spec::Unix") ) {
-		plan tests => 1 + 9 * (FORKS+1 + 3);
+		plan tests => 1 + 9 * (FORKS+1 + (3*2));
 	} else {
 		plan skip_all => "not running on something UNIXish";
 	}
@@ -29,7 +29,7 @@ if ( eval { require Hook::LexWrap } ) {
 }
 
 foreach my $forks ( 0 .. FORKS ) {
-	foreach my $global_lock ( $forks < 3 ? ( 1, 0) : (0) ) {
+	foreach my $global_lock ( $forks < 3 ? (1, 0, undef) : (0) ) {
 		my $s = scratch();
 
 		$s->create_tree({
@@ -70,7 +70,7 @@ foreach my $forks ( 0 .. FORKS ) {
 			{
 				alarm 5;
 				my $d = Directory::Transactional->new(
-					global_lock => $global_lock,
+					global_lock => ( defined($global_lock) ? $global_lock : ( rand(1) < 0.5 ) ),
 					root        => $base,
 					_work       => $base->subdir("work")->stringify,
 				);

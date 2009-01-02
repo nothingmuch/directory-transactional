@@ -145,13 +145,12 @@ has _txn => (
 	clearer => "_clear_txn",
 );
 
-has [qw(_txn_lock_file _shared_lock_file)] => (
+has _shared_lock_file => (
 	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
 );
 
-sub _build__txn_lock_file { File::Spec->catfile(shift->_work, "txn_lock") }
 sub _build__shared_lock_file { shift->_work . ".lock" }
 
 has _shared_lock => (
@@ -208,7 +207,6 @@ sub DEMOLISH {
 		rmdir $self->_work;
 		rmdir $self->_txns;
 		rmdir $self->_backups;
-		CORE::unlink $self->_txn_lock_file;
 
 		rmdir $self->_work;
 
@@ -373,7 +371,11 @@ sub txn_begin {
 		# this is a top level transaction
 		$txn = Directory::Transactional::TXN::Root->new(
 			manager => $self,
-			( $self->global_lock ? ( global_lock => $self->_get_lock( $self->_txn_lock_file, LOCK_EX ) ) : () ),
+			( $self->global_lock ? (
+				# when global_lock is set, take an exclusive lock on the root dir
+				# non global lockers take a shared lock on it
+				global_lock => $self->_get_flock( File::Spec->catfile( $self->_locks, ".lock" ), LOCK_EX)
+			) : () ),
 		);
 	}
 
@@ -465,10 +467,8 @@ sub _lock_path_write {
 	my $txn = $self->_txn;
 
 	if ( my $lock = $txn->get_lock($path) ) {
-		unless ( $lock->is_exclusive ) {
-			# simplest scenario, we already have a lock in this transaction
-			$lock->upgrade; # upgrade it if necessary
-		}
+		# simplest scenario, we already have a lock in this transaction
+		$lock->upgrade; # upgrade it if necessary
 	} elsif ( my $inherited_lock = $txn->find_lock($path) ) {
 		# a parent transaction has a lock
 		unless ( $inherited_lock->is_exclusive ) {
@@ -534,7 +534,6 @@ sub lock_path_write {
 
 	return if $self->global_lock;
 
-	# lock the ancestor directories for reading
 	$self->_lock_parent($path);
 
 	$self->_lock_path_write($path);
