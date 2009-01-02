@@ -298,13 +298,17 @@ sub merge_overlay {
 }
 
 sub txn_do {
-	my ( $self, $coderef, %args ) = @_;
+	my ( $self, @args ) = @_;
 
-	my @args = @{ $args{args} || [] };
+	unshift @args, "body" if @args % 2;
 
-	my ( $commit, $rollback ) = @args{qw(commit rollback)};
+	my %args = @args;
+
+	my ( $coderef, $commit, $rollback, $code_args ) = @args{qw(body commit rollback args)};
 
 	ref $coderef eq 'CODE' or croak '$coderef must be a CODE reference';
+
+	$code_args ||= [];
 
 	$self->txn_begin;
 
@@ -317,11 +321,11 @@ sub txn_do {
 
 		my $success = eval {
 			if ( $wantarray ) {
-				@result = $coderef->(@args);
+				@result = $coderef->(@$code_args);
 			} elsif( defined $wantarray ) {
-				$result[0] = $coderef->(@args);
+				$result[0] = $coderef->(@$code_args);
 			} else {
-				$coderef->(@args);
+				$coderef->(@$code_args);
 			}
 
 			$commit && $commit->();
