@@ -106,15 +106,18 @@ sub _get_flock {
 	package Directory::Transactional::Lock;
 
 	sub unlock { close $_[0] }
+	sub is_exclusive { 0 }
+	sub is_shared { 0 }
+	sub upgrade { }
+	sub downgrade { }
 
 	package Directory::Transactional::Lock::Exclusive;
 	use Fcntl qw(LOCK_SH);
 
 	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
-	sub is_shared { 0 }
 	sub is_exclusive { 1 }
-	sub upgrade { }
+
 	sub downgrade {
 		my $self = shift;
 		flock($self, LOCK_SH) or die $!;
@@ -127,13 +130,12 @@ sub _get_flock {
 	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
 	sub is_shared { 1 }
-	sub is_exclusive { 0 }
 	sub upgrade {
 		my $self = shift;
 		flock($self, LOCK_EX) or die $!;
 		bless($self, "Directory::Transactional::Lock::Exclusive");
 	}
-	sub downgrade { }
+
 }
 
 # this is the current active TXN (head of transaction stack)
