@@ -877,6 +877,16 @@ issues with locking, but try not to reuse paths and always reask for them to
 ensure that the right "real" path is returned even if the transaction stack has
 changed, or anything else.
 
+=item No forking
+
+If you fork in the middle of the transaction both the parent and the child have
+write locks, and both the parent and the child will try to commit or rollback
+when resources are being cleaned up.
+
+Either create the L<Directory::Transactional> instance within the child
+process, or use L<POSIX/_exit> and do not open or close any transactions in the
+child.
+
 =back
 
 =head1 ACID GUARANTEES
