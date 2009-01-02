@@ -516,7 +516,9 @@ sub _lock_parent {
 sub lock_path_read {
 	my ( $self, $path ) = @_;
 
-	my $txn = $self->_txn or croak("Can't lock file for writing without an active transaction");
+	unless ( $self->_txn ) {
+		croak("Can't lock file for reading without an active transaction");
+	}
 
 	return if $self->global_lock;
 
@@ -530,7 +532,9 @@ sub lock_path_read {
 sub lock_path_write {
 	my ( $self, $path ) = @_;
 
-	my $txn = $self->_txn or croak("Can't lock file for writing without an active transaction");
+	unless ( $self->_txn ) {
+		croak("Can't lock file for writing without an active transaction");
+	}
 
 	return if $self->global_lock;
 
