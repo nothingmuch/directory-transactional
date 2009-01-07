@@ -6,6 +6,7 @@ use warnings;
 use Test::More;
 
 use File::Spec::Functions;
+use Scope::Guard;
 
 use constant FORKS => 6;
 use constant ITERS => 3;
