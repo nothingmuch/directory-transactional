@@ -1214,8 +1214,8 @@ ACID stands for atomicity, consistency, isolation and durability.
 
 Transactions are atomic (using locks), consistent (a recovery mode is able to
 restore the state of the directory if a process crashed while comitting a
-transaction), isolated (each transaction works in its own temporary directory,
-and durable (once C<txn_commit> returns a software crash will not call the
+transaction), isolated (each transaction works in its own temporary directory),
+and durable (once C<txn_commit> returns a software crash will not cause the
 transaction to rollback).
 
 =head1 TRANSACTIONAL PROTOCOL
