@@ -78,6 +78,10 @@ $s->create_tree({
 	ok( !$m->_txn, "no transaction" );
 
 	is( $s->read("bar.txt"), "lalala", "file unchanged" );
+
+	ok( $m->exists("bar.txt"), "file exists" );
+
+	is_deeply( [ sort $m->readdir("/") ], [ sort qw(. .. bar.txt baz.txt blah) ], "readdir" );
 }
 
 {

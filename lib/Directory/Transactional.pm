@@ -640,11 +640,15 @@ sub _locate_file_in_overlays {
 sub old_stat {
 	my ( $self, $path ) = @_;
 
+	my $t = $self->_auto_txn;
+
 	CORE::stat($self->_locate_file_in_overlays($path));
 }
 
 sub stat {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
 
 	require File::stat;
 	File::stat::stat($self->_locate_file_in_overlays($path));
@@ -658,11 +662,16 @@ sub is_deleted {
 
 sub exists {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
+
 	return -e $self->_locate_file_in_overlays($path);
 }
 
 sub is_dir {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
 
 	# FIXME this is an ugly kludge, we really need to keep better track of
 	# why/when directories are created, make note of them in 'is_changed', etc.
@@ -678,11 +687,16 @@ sub is_dir {
 
 sub is_file {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
+
 	return -f $self->_locate_file_in_overlays($path);
 }
 
 sub unlink {
 	my ( $self, $path ) = @_;
+
+	my $t = $self->_auto_txn;
 
 	# lock parent for writing
 	my ( undef, $dir ) = File::Spec->splitpath($path);
@@ -812,6 +826,8 @@ sub readdir {
 
 	undef $path if $path eq "/" or !length($path);
 
+	my $t = $self->_auto_txn;
+
 	my $files = $self->_readdir_from_overlay($path);
 
 	my @txns = $self->_txn_stack;
@@ -838,9 +854,9 @@ sub readdir {
 sub list {
 	my ( $self, $path ) = @_;
 
-	my $t = $self->_auto_txn;
-
 	undef $path if $path eq "/" or !length($path);
+
+	my $t = $self->_auto_txn;
 
 	my $files = $self->_readdir_from_overlay($path);
 
