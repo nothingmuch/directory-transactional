@@ -147,7 +147,7 @@ foreach my $forks ( 0 .. FORKS ) {
 				}
 			}
 
-			while( wait	!= -1 ) { $exit = 1 if $? }
+			while( wait != -1 ) { $exit = 1 if $? }
 		}
 
 		wait;

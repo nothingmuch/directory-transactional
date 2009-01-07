@@ -81,26 +81,26 @@ foreach my $nfs ( 0, 1 ) {
 		ok( not( -e dir($dir)->file("new_file.txt") ), "new file deleted" );
 
 		$d->txn_do(sub {
-				my $outer_path = $d->_work_path($name);
+			my $outer_path = $d->_work_path($name);
+
+			ok( not( -e $outer_path ), "txn not yet modified" );
+
+			is( $file->slurp, "dancing\n", "root file not yet modified" );
+
+			$d->txn_do(sub {
+
+				$d->openw($name)->print("hippies\n");
 
 				ok( not( -e $outer_path ), "txn not yet modified" );
 
 				is( $file->slurp, "dancing\n", "root file not yet modified" );
 
-				$d->txn_do(sub {
-
-					$d->openw($name)->print("hippies\n");
-
-					ok( not( -e $outer_path ), "txn not yet modified" );
-
-					is( $file->slurp, "dancing\n", "root file not yet modified" );
-
-				});
-
-				is( file($outer_path)->slurp, "hippies\n", "nested transaction comitted to parent" );
-
-				is( $file->slurp, "dancing\n", "root file not yet modified" );
 			});
+
+			is( file($outer_path)->slurp, "hippies\n", "nested transaction comitted to parent" );
+
+			is( $file->slurp, "dancing\n", "root file not yet modified" );
+		});
 
 		is( $file->slurp, "hippies\n", "root file comitted" );
 

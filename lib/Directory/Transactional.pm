@@ -488,7 +488,7 @@ sub _resource_auto_txn {
 		croak "Auto commit is disabled" unless $self->auto_commit;
 
 		require Directory::Transactional::AutoCommit;
-		
+
 		my $h = Directory::Transactional::AutoCommit->new( manager => $self );
 
 		$self->txn_begin( auto_handle => $h );
