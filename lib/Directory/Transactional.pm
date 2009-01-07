@@ -26,7 +26,12 @@ has root => (
 	required => 1,
 );
 
-has [qw(_root _work _backups _txns _locks)] => (
+has _fatal => (
+	isa => "Bool",
+	is  => "rw",
+);
+
+has [qw(_root _work _backups _txns _locks _dirty _dirty_lock)] => (
 	isa => "Str",
 	is  => "ro",
 	lazy_build => 1,
@@ -37,6 +42,8 @@ sub _build__work    { File::Spec->catdir(shift->_root, ".txn_work_dir") } # top 
 sub _build__txns    { File::Spec->catdir(shift->_work, "txns") } # one subdir per transaction, used for temporary files when transactions are active
 sub _build__backups { File::Spec->catdir(shift->_work, "backups") } # one subdir per transaction, used during commit to root
 sub _build__locks   { File::Spec->catdir(shift->_work, "locks") } # shared between all workers, directory for lockfiles
+sub _build__dirty   { File::Spec->catfile(shift->_work, "dirty") }
+sub _build__dirty_lock { shift->_dirty . ".lock" }
 
 has nfs => (
 	isa => "Bool",
@@ -52,6 +59,12 @@ has global_lock => (
 );
 
 has auto_commit => (
+	isa => "Bool",
+	is  => "ro",
+	default => 1,
+);
+
+has crash_detection => (
 	isa => "Bool",
 	is  => "ro",
 	default => 1,
@@ -121,6 +134,7 @@ sub _get_flock {
 	sub is_exclusive { 0 }
 	sub is_shared { 0 }
 	sub upgrade { }
+	sub upgrade_nb { $_[0] }
 	sub downgrade { }
 
 	package Directory::Transactional::Lock::Exclusive;
@@ -137,7 +151,7 @@ sub _get_flock {
 	}
 
 	package Directory::Transactional::Lock::Shared;
-	use Fcntl qw(LOCK_EX);
+	use Fcntl qw(LOCK_EX LOCK_NB);
 
 	BEGIN { our @ISA = qw(Directory::Transactional::Lock) }
 
@@ -148,6 +162,19 @@ sub _get_flock {
 		bless($self, "Directory::Transactional::Lock::Exclusive");
 	}
 
+	sub upgrade_nb {
+		my $self = shift;
+
+		unless ( flock($self, LOCK_EX|LOCK_NB) ) {
+			if ( $!{EWOULDBLOCK} ) {
+				return;
+			} else {
+				die $!;
+			}
+		}
+
+		bless($self, "Directory::Transactional::Lock::Exclusive");
+	}
 }
 
 # this is the current active TXN (head of transaction stack)
@@ -202,6 +229,8 @@ sub BUILD {
 sub DEMOLISH {
 	my $self = shift;
 
+	return if $self->_fatal; # encountered a fatal error, we need to run recovery
+
 	# rollback any open txns
 	while ( $self->_txn ) {
 		$self->txn_rollback;
@@ -220,10 +249,77 @@ sub DEMOLISH {
 		rmdir $self->_txns;
 		rmdir $self->_backups;
 
+		unlink $self->_dirty;
+		unlink $self->_dirty_lock;
+
 		rmdir $self->_work;
 
 		CORE::unlink $self->_shared_lock_file;
 	}
+}
+
+sub check_dirty {
+	my $self = shift;
+
+	return unless $self->crash_detection;
+
+	# get the short lived dirty flag manipulation lock
+	# nobody else can check or modify the dirty flag while we have it
+	my $ex_lock = $self->_get_lock( $self->_dirty_lock, LOCK_EX );
+
+	my $dirty = $self->_dirty;
+
+	# if the dirty flag is set, run a check
+	if ( -e $dirty ) {
+		my $b = $self->_backups;
+
+		# go through the comitting transactions
+		foreach my $name ( IO::Dir->new($b)->read ) {
+			next unless $name =~ /^[\w\-]+$/; # txn dir
+
+			my $dir = File::Spec->catdir($b, $name);
+
+			if ( my $ex_lock = $self->_get_lock( $dir . ".lock", LOCK_EX|LOCK_NB ) ) {
+				# there is a potential race condition between the readdir
+				# and getting the lock. make sure it still exists
+				if ( -d $dir ) {
+					$self->online_recover;
+					return $ex_lock;
+				}
+			}
+		}
+
+		# the check passed, now we can clear the dirty flag if there are no
+		# other running commits
+		if ( my $flag_ex_lock = $self->_get_lock( $dirty, LOCK_EX|LOCK_NB ) ) {
+			unlink $dirty;
+		}
+	}
+
+	# return the lock.
+	# for as long as it is held the workdir cannot be marked dirty except by
+	# this process
+	return $ex_lock;
+}
+
+sub set_dirty {
+	my $self = shift;
+
+	return unless $self->crash_detection;
+
+	# first check that the dir is not dirty, and take an exclusive lock for
+	# dirty flag manipulation
+	my $ex_lock = $self->check_dirty;
+
+	# next mark the dir as dirty, and take a shared lock so the flag won't be
+	# cleared by check_dirty
+
+	my $dirty_lock = $self->_get_lock( $self->_dirty, LOCK_SH );
+
+	# create the file if necessary (nfs uses an auxillary lock file)
+	open my $fh, ">", $self->_dirty or die $! if $self->nfs;
+
+	return $dirty_lock;
 }
 
 sub recover {
@@ -236,13 +332,17 @@ sub recover {
 
 			my $txn_backup = File::Spec->catdir($b, $name); # each of these is one transaction
 
-			my $files = $self->_get_file_list($txn_backup);
+			if ( -d $txn_backup ) {
+				my $files = $self->_get_file_list($txn_backup);
 
-			# move all the backups back into the root directory
-			$self->merge_overlay( from => $txn_backup, to => $self->_root, files => $files );
+				# move all the backups back into the root directory
+				$self->merge_overlay( from => $txn_backup, to => $self->_root, files => $files );
 
-			remove_tree($txn_backup);
+				remove_tree($txn_backup);
+			}
 		}
+
+		remove_tree($b, { keep_root => 1 });
 	}
 
 	# delete all temp files (fully comitted but not cleaned up transactions,
@@ -250,6 +350,26 @@ sub recover {
 	if ( -d $self->_txns ) {
 		remove_tree( $self->_txns, { keep_root => 1 } );
 	}
+
+	unlink $self->_dirty;
+	unlink $self->_dirty_lock;
+}
+
+sub online_recover {
+	my $self = shift;
+
+	unless ( $self->nfs ) { # can't upgrade an nfs lock
+		my $lock = $self->_shared_lock;
+
+		if ( $lock->upgrade_nb ) {
+			$self->recover;
+			$lock->downgrade;
+			return 1;
+		}
+	}
+
+	$self->_fatal(1);
+	croak "Detected crashed transaction, terminate all processes and run recovery by reinstantiating directory";
 }
 
 sub _get_file_list {
@@ -417,17 +537,35 @@ sub _pop_txn {
 sub txn_commit {
 	my $self = shift;
 
-	my $txn = $self->_pop_txn;
+	my $txn = $self->_txn;
 
 	my $changed = $txn->changed;
 
 	if ( $changed->size ) {
 		if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
 			# commit the work, backing up in the backup dir
-			$self->merge_overlay( from => $txn->work, to => $self->_root, backup => $txn->backup, files => $changed );
 
-			# we're finished, remove backup dir denoting successful commit
-			CORE::rename $txn->backup, $txn->work . ".cleanup" or die $!;
+			# first take a lock on the backup dir
+			# this is used to detect crashed transactions
+			# if the dir exists but isn't locked then the transaction crashed
+			my $txn_lockfile = $txn->backup . ".lock";
+			my $txn_lock = $self->_get_lock( $txn_lockfile, LOCK_EX );
+
+			{
+				# during a commit the work dir is considered dirty
+				# this flag is set until check_dirty clears it
+				my $dirty_lock = $self->set_dirty;
+
+				$txn->create_backup_dir;
+
+				# move all the files from the txn dir into the root dir, using the backup dir
+				$self->merge_overlay( from => $txn->work, to => $self->_root, backup => $txn->backup, files => $changed );
+
+				# we're finished, remove backup dir denoting successful commit
+				CORE::rename $txn->backup, $txn->work . ".cleanup" or die $!;
+			}
+
+			unlink $txn_lockfile;
 		} else {
 			# it's a nested transaction, which means we don't need to be
 			# careful about comitting to the parent, just share all the locks,
@@ -437,10 +575,12 @@ sub txn_commit {
 			$self->merge_overlay( from => $txn->work, to => $txn->parent->work, files => $changed );
 		}
 
-		# clean up work dir and backup dir
+		# clean up work dir and (renamed) backup dir
 		remove_tree( $txn->work );
 		remove_tree( $txn->work . ".cleanup" );
 	}
+
+	$self->_pop_txn;
 
 	return;
 }
@@ -450,10 +590,20 @@ sub txn_rollback {
 
 	my $txn = $self->_pop_txn;
 
-	# any inherited locks that have been upgraded in this txn need to be
-	# downgraded back to shared locks
-	foreach my $lock ( @{ $txn->downgrade } ) {
-		$lock->downgrade;
+	if ( $txn->isa("Directory::Transactional::TXN::Root") ) {
+		# an error happenned during txn_commit trigerring a rollback
+		if ( -d ( my $txn_backup = $txn->backup ) ) {
+			my $files = $self->_get_file_list($txn_backup);
+
+			# move all the backups back into the root directory
+			$self->merge_overlay( from => $txn_backup, to => $self->_root, files => $files );
+		}
+	} else {
+		# any inherited locks that have been upgraded in this txn need to be
+		# downgraded back to shared locks
+		foreach my $lock ( @{ $txn->downgrade } ) {
+			$lock->downgrade;
+		}
 	}
 
 	# now all we need to do is trash the tempfiles and we're done
@@ -638,7 +788,11 @@ sub _locate_file_in_overlays {
 	if ( my $txn = $self->_txn_for_path($path) ) {
 		File::Spec->catfile($txn->work, $path);
 	} else {
-		$self->lock_path_read($path);
+		#unless ( $self->_txn->find_lock($path) ) { # can't optimize this way if an explicit lock was taken
+			# we only take a read lock on the root dir if the state isn't dirty
+			my $ex_lock = $self->check_dirty;
+			$self->lock_path_read($path);
+		#}
 		File::Spec->catfile($self->_root, $path);
 	}
 }
@@ -808,6 +962,8 @@ sub _readdir_from_overlay {
 	my ( $self, $path ) = @_;
 
 	my $t = $self->_auto_txn;
+
+	my $ex_lock = $self->check_dirty;
 
 	my @dirs = $self->_locate_dirs_in_overlays($path);
 
@@ -1093,6 +1249,19 @@ restoring all the renamed backup files. Moving the backup directory into the
 work directory signifies that the transaction has comitted successfully, and
 recovery will clean these files up normally.
 
+If C<crash_detection> is enabled (the default) when reading any file from the
+root directory (shared global state) the system will first check for crashed
+commits.
+
+Crashed commits are detected by means of lock files. If the backup directory is
+locked that means its comitting process is still alive, but if a directory
+exists without a lock then that process has crashed. A global dirty flag is
+maintained to avoid needing to check all the backup directories each time.
+
+If the commit is still running then it can be assumed that the process
+comitting it still has all of its exclusive locks so reading from the root
+directory is safe.
+
 =head1 LIMITATIONS
 
 =head2 Auto-Commit
@@ -1177,6 +1346,22 @@ cause a transaction to be automatically created and comitted.
 
 Transactions automatically created for operations which return things like
 filehandles will stay alive for as long as the returned resource does.
+
+=item crash_detection
+
+IF true (the default), all read operations accessing global state (the root
+directory) will first ensure that the global directory is not dirty.
+
+If the perl process crashes while comitting the transaction but other
+concurrent processes are still alive, the directory is left in an inconsistent
+state, but all the locks are dropped. When C<crash_detection> is enabled ACID
+semantics are still guaranteed, at the cost of locking and stating a file for
+each read operation on the global directory.
+
+If you disable this then you are only protected from system crashes (recovery
+will be run on the next instantiation of L<Directory::Transactional>) or soft
+crashes where the crashing process has a chance to run all its destructors
+properly.
 
 =back
 
@@ -1327,6 +1512,19 @@ Merges one directory over another.
 Runs the directory state recovery code.
 
 See L</"TRANSACTIONAL PROTOCOL">
+
+=item online_recover
+
+Called to recover when the directory is already instantiated, by C<check_dirty>
+if a dirty state was found.
+
+=item check_dirty
+
+Check for transactions that crashed in mid commit
+
+=item set_dirty
+
+Called just before starting a commit.
 
 =item vivify_path $path
 

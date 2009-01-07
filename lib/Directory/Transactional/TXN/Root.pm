@@ -29,9 +29,12 @@ has backup => (
 
 sub _build_backup {
 	my $self = shift;
-	my $dir = File::Spec->catdir( $self->manager->_backups, $self->id );
-	make_path($dir);
-	return $dir;
+	File::Spec->catdir( $self->manager->_backups, $self->id );
+}
+
+sub create_backup_dir {
+	my $self = shift;
+	make_path($self->backup);
 }
 
 sub find_lock {
