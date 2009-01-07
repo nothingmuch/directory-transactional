@@ -69,6 +69,12 @@ sub _get_lock {
 sub _get_nfslock {
 	my ( $self, $file, $mode ) = @_;
 
+	# create the parent directory for the lock if necessary
+	# (the lock dir is cleaned on destruction)
+	my ( $vol, $dir ) = File::Spec->splitpath($file);
+	my $parent = File::Spec->catpath($vol, $dir, '');
+	make_path($parent) unless -d $parent;
+
 	require File::NFSLock;
 	if ( my $lock = File::NFSLock->new({
 			file      => $file,
