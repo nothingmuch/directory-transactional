@@ -1198,6 +1198,14 @@ Either create the L<Directory::Transactional> instance within the child
 process, or use L<POSIX/_exit> and do not open or close any transactions in the
 child.
 
+=item No mixing of C<nfs> and C<flock>
+
+C<nfs> mode is not compatible with C<flock> mode. If you enable C<nfs> enable
+it in B<all> processes working on the same directory.
+
+Conversely, under C<flock> mode C<global_lock> B<is> compatible with fine
+grained locking.
+
 =back
 
 =head1 ACID GUARANTEES
