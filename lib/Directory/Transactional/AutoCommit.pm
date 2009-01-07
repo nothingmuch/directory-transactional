@@ -3,6 +3,8 @@
 package Directory::Transactional::AutoCommit;
 use Moose;
 
+use Scope::Guard;
+
 use namespace::clean -except => 'meta';
 
 use Hash::Util::FieldHash::Compat qw(fieldhash);
