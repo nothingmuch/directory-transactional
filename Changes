@@ -1,3 +1,6 @@
+0.05
+	- Urgh, load Scope::Guard in the test as well
+
 0.04
 	- detect crashed transactions by checking for dirty state when accessing
 	  global data
