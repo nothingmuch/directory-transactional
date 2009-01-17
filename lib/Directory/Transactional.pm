@@ -1302,8 +1302,6 @@ C<global_lock> also performs better, but causes long wait times if multiple
 processes are accessing the same database but not the same data. For web
 applications C<global_lock> should probably be off for better concurrency.
 
-=back
-
 =head1 ATTRIBUTES
 
 =over 4
