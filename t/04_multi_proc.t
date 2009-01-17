@@ -71,6 +71,8 @@ foreach my $forks ( 0 .. FORKS ) {
 
 			srand($$); # otherwise rand returns the same in all children
 
+			# delay instantiation of the directory to a random point in the
+			# recovery
 			select(undef,undef,undef,0.07 * rand);
 
 			{
