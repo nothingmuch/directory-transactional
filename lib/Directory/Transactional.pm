@@ -4,6 +4,8 @@
 package Directory::Transactional;
 use Squirrel;
 
+use Time::HiRes qw(alarm);
+
 use Set::Object;
 
 use Carp;
@@ -70,6 +72,12 @@ has crash_detection => (
 	default => 1,
 );
 
+has timeout => (
+	isa => "Num",
+	is  => "ro",
+	predicate => "has_timeout",
+);
+
 sub _get_lock {
 	my ( $self, @args ) = @_;
 
@@ -92,6 +100,7 @@ sub _get_nfslock {
 	if ( my $lock = File::NFSLock->new({
 			file      => $file,
 			lock_type => $mode,
+			( $self->has_timeout ? ( blocking_timeout => $self->timeout ) : () ),
 		}) ) {
 		return $lock;
 	} elsif ( not($mode & LOCK_NB) ) {
@@ -115,7 +124,18 @@ sub _get_flock {
 	# open the lockfile, creating if necessary
 	open my $fh, "+>", $file or die $!;
 
-	if ( flock($fh, $mode) ) {
+	my $ret;
+
+	if ( not($mode & LOCK_NB) and $self->has_timeout ) {
+		local $SIG{ALRM} = sub { croak "Lock timed out" };
+		alarm($self->timeout);
+		$ret = flock($fh, $mode);
+		alarm(0);
+	} else {
+		$ret = flock($fh, $mode);
+	}
+
+	if ( $ret ) {
 		my $class = ($mode & LOCK_EX) ? "Directory::Transactional::Lock::Exclusive" : "Directory::Transactional::Lock::Shared";
 		return bless $fh, $class;
 	} elsif ( $!{EWOULDBLOCK} or $!{EAGAIN} ) {
@@ -1345,6 +1365,13 @@ This is useful for avoiding deadlocks (there is no deadlock detection code in
 the fine grained locking).
 
 This flag is automatically set if C<nfs> is set.
+
+=item timeout
+
+If set will be used to specify a time limit for blocking calls to lock.
+
+If you are experiencing deadlocks it is reccomended to set this or
+C<global_lock>.
 
 =item auto_commit
 
