@@ -1291,6 +1291,30 @@ If the commit is still running then it can be assumed that the process
 comitting it still has all of its exclusive locks so reading from the root
 directory is safe.
 
+=head1 DEADLOCKS
+
+This module does not implement deadlock detection. Unfortunately maintaing a
+lock table is a delicate and difficult task, so I doubt I will ever implement
+it.
+
+The good news is that certain operating systems (like HPUX) may implement
+deadlock detection in the kernel, and return C<EDEADLK> instead of just
+blocking forever.
+
+If you are not so lucky, specify a C<timeout> or make sure you always take
+locks in the same order.
+
+The C<global_lock> flag can also be used to prevent deadlocks entirely, at the
+cost of concurrency. This provides fully serializable level transaction
+isolation with no possibility of serialization failures due to deadlocks.
+
+There is no pessimistic locking mode (read-modify-write optimized) since all
+paths leading to a file are locked for reading. This mode, if implemented,
+would be semantically identical to C<global_lock> but far less efficient.
+
+In the future C<fcntl> based locking may be implemented in addition to
+C<flock>. C<EDEADLK> seems to be more widely supported when using C<fcntl>.
+
 =head1 LIMITATIONS
 
 =head2 Auto-Commit
