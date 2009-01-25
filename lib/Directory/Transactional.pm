@@ -118,11 +118,12 @@ sub _get_flock {
 	if ( flock($fh, $mode) ) {
 		my $class = ($mode & LOCK_EX) ? "Directory::Transactional::Lock::Exclusive" : "Directory::Transactional::Lock::Shared";
 		return bless $fh, $class;
-	} elsif ( not $!{EWOULDBLOCK} ) {
+	} elsif ( $!{EWOULDBLOCK} or $!{EAGAIN} ) {
+		# LOCK_NB failed
+		return;
+	} else {
 		# die on any error except failing to obtain a nonblocking lock
 		die $!;
-	} else {
-		return;
 	}
 }
 
