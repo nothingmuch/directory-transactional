@@ -1,3 +1,8 @@
+0.06
+	- timeouts
+	- documentation fixes
+	- correct skip count for stress test
+
 0.05
 	- Urgh, load Scope::Guard in the test as well
 
