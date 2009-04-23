@@ -5,7 +5,7 @@ use warnings;
 
 use Test::More tests => 5;
 
-use ok 'Directory::Transactional'; # force Squirrel to load Moose by running before Test::TempDir
+use ok 'Directory::Transactional'; # force Any::Moose to load Moose by running before Test::TempDir
 BEGIN { ok( !$INC{"Moose.pm"}, "Moose not loaded" ) }
 
 use Test::TempDir qw(temp_root);

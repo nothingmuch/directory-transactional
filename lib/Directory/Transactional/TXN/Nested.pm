@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 package Directory::Transactional::TXN::Nested;
-use Squirrel;
+use Any::Moose;
 
 use namespace::clean -except => 'meta';
 

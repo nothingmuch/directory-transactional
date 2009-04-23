@@ -2,7 +2,7 @@
 # ABSTRACT: ACID transactions on a directory tree
 
 package Directory::Transactional;
-use Squirrel;
+use Any::Moose;
 
 use Time::HiRes qw(alarm);
 
