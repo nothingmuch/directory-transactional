@@ -3,10 +3,9 @@
 use strict;
 use warnings;
 
-use Test::More tests => 5;
+use Test::More;
 
-use ok 'Directory::Transactional'; # force Any::Moose to load Moose by running before Test::TempDir
-BEGIN { ok( !$INC{"Moose.pm"}, "Moose not loaded" ) }
+use ok 'Directory::Transactional'; # force Moose to load Moose by running before Test::TempDir
 
 use Test::TempDir qw(temp_root);
 
@@ -26,3 +25,5 @@ my $work;
 }
 
 ok( not( -d $work ), "work dir removed" );
+
+done_testing;

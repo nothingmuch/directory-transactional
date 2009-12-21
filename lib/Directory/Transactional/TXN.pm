@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 package Directory::Transactional::TXN;
-use Any::Moose;
+use Moose;
 
 use Set::Object;
 use File::Spec;

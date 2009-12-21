@@ -2,7 +2,7 @@
 # ABSTRACT: ACID transactions on a directory tree
 
 package Directory::Transactional;
-use Any::Moose;
+use Moose;
 
 use Time::HiRes qw(alarm);
 
@@ -20,6 +20,8 @@ use IO::Dir;
 use Directory::Transactional::TXN::Root;
 use Directory::Transactional::TXN::Nested;
 #use Directory::Transactional::Stream; # we require it later, it wants real Moose
+
+use Try::Tiny;
 
 use namespace::clean -except => 'meta';
 
@@ -265,7 +267,7 @@ sub DEMOLISH {
 	# condition in their directory creation code
 	if ( my $ex_lock = $self->_get_lock( $self->_shared_lock_file, LOCK_EX|LOCK_NB ) ) {
 		# we don't really care if there's an error
-		remove_tree($self->_locks);
+		try { remove_tree($self->_locks) };
 		rmdir $self->_work;
 		rmdir $self->_txns;
 		rmdir $self->_backups;
@@ -918,7 +920,7 @@ sub openr {
 
 	my $src = $self->_locate_file_in_overlays($file);
 
-	open my $fh, "<", $src, or die "openr($file): $!";
+	open my $fh, "<", $src or die "openr($file): $!";
 
 	$t->register($fh) if $t;
 

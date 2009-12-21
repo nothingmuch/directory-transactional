@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 package Directory::Transactional::TXN::Nested;
-use Any::Moose;
+use Moose;
 
 use namespace::clean -except => 'meta';
 
