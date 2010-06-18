@@ -1,3 +1,9 @@
+0.09
+	- s/Any::Moose/Moose/;
+	- Data::GUID instead of Data::UUID/LibUUID. This solves the sporadic
+	  failures which were the result of pseudorandom UUID generation returning
+	  the same values across forks using libuuid on OSX/debian.
+
 0.08
 	- Depend on Any::Moose
 
