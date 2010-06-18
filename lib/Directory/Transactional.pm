@@ -267,7 +267,7 @@ sub DEMOLISH {
 	# condition in their directory creation code
 	if ( my $ex_lock = $self->_get_lock( $self->_shared_lock_file, LOCK_EX|LOCK_NB ) ) {
 		# we don't really care if there's an error
-		try { remove_tree($self->_locks) };
+		try { local $SIG{__WARN__} = sub { }; remove_tree($self->_locks) };
 		rmdir $self->_work;
 		rmdir $self->_txns;
 		rmdir $self->_backups;
